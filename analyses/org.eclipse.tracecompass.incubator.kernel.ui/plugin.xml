@@ -20,6 +20,9 @@
                class="org.eclipse.tracecompass.incubator.internal.kernel.core.fileaccess.FileAccessAnalysis">
          </analysisModuleClass>
       </output>
+      <listener
+            class="org.eclipse.tracecompass.incubator.internal.kernel.ui.listener.CriticalPathListener">
+      </listener>
    </extension>
 
 </plugin>
