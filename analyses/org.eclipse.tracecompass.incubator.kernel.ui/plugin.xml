@@ -10,6 +10,14 @@
             name="File Access (File)"
             restorable="true">
       </view>
+      <view
+            category="org.eclipse.linuxtools.lttng2.ui.views.category"
+            class="org.eclipse.tracecompass.incubator.internal.callstack.ui.views.weightedtree.WeightedTreeView"
+            icon="icons/eview16/latency.png"
+            id="org.eclipse.tracecompass.incubator.callstack.ui.views.weightedtree:org.eclipse.tracecompass.incubator.kernel.core.criticalpath.aggregated"
+            name="Critical Path Aggregated"
+            restorable="true">
+      </view>
    </extension>
    <extension
          point="org.eclipse.linuxtools.tmf.core.analysis">
@@ -20,9 +28,13 @@
                class="org.eclipse.tracecompass.incubator.internal.kernel.core.fileaccess.FileAccessAnalysis">
          </analysisModuleClass>
       </output>
-      <listener
-            class="org.eclipse.tracecompass.incubator.internal.kernel.ui.listener.CriticalPathListener">
-      </listener>
+      <output
+            class="org.eclipse.tracecompass.tmf.ui.analysis.TmfAnalysisViewOutput"
+            id="org.eclipse.tracecompass.incubator.callstack.ui.views.weightedtree:org.eclipse.tracecompass.incubator.kernel.core.criticalpath.aggregated">
+         <analysisModuleClass
+               class="org.eclipse.tracecompass.incubator.internal.kernel.core.criticalpath.CriticalPathAggregated">
+         </analysisModuleClass>
+      </output>
    </extension>
 
 </plugin>
