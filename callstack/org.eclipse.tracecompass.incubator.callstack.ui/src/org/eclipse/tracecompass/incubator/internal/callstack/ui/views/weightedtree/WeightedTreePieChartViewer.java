@@ -20,6 +20,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
+import org.apache.commons.lang3.StringUtils;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.ListenerList;
@@ -299,12 +300,8 @@ public class WeightedTreePieChartViewer extends TmfTimeViewer {
             pie.getTitle().setForeground(foregroundColor);
             pie.setBackground(backgroundColor);
             pie.setForeground(foregroundColor);
-            pie.getAxisSet().getXAxis(0).getTitle().setText(""); // Hide //$NON-NLS-1$
-                                                                 // the
-                                                                 // title
-                                                                 // over
-                                                                 // the
-                                                                 // legend
+            // Hide the title over the legend
+            pie.getAxisSet().getXAxis(0).getTitle().setText(StringUtils.EMPTY);
             pie.getAxisSet().getXAxis(0).getTitle().setForeground(foregroundColor);
             pie.getLegend().setVisible(true);
             pie.getLegend().setPosition(SWT.RIGHT);
@@ -330,12 +327,8 @@ public class WeightedTreePieChartViewer extends TmfTimeViewer {
             pie.getTitle().setForeground(foregroundColor);
             pie.setBackground(backgroundColor);
             pie.setForeground(foregroundColor);
-            pie.getAxisSet().getXAxis(0).getTitle().setText(""); // Hide //$NON-NLS-1$
-                                                                 // the
-                                                                 // title
-                                                                 // over
-                                                                 // the
-                                                                 // legend
+            // Hide the title over the legend
+            pie.getAxisSet().getXAxis(0).getTitle().setText(StringUtils.EMPTY);
             pie.getAxisSet().getXAxis(0).getTitle().setForeground(foregroundColor);
             pie.getLegend().setVisible(true);
             pie.getLegend().setPosition(SWT.RIGHT);
