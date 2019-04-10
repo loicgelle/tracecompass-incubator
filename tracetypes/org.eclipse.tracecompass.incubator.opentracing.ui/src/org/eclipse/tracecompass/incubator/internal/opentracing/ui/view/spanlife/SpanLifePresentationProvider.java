@@ -16,11 +16,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import org.apache.commons.lang3.ArrayUtils;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.jdt.annotation.NonNull;
 import org.eclipse.jdt.annotation.Nullable;
 import org.eclipse.swt.graphics.RGB;
 import org.eclipse.swt.graphics.RGBA;
+import org.eclipse.tracecompass.incubator.internal.callstack.ui.FlameViewPalette;
 import org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife.SpanLifeEntryModel;
 import org.eclipse.tracecompass.tmf.core.model.filters.SelectionTimeQueryFilter;
 import org.eclipse.tracecompass.tmf.core.model.timegraph.ITimeGraphDataProvider;
@@ -39,6 +41,8 @@ import org.eclipse.tracecompass.tmf.ui.widgets.timegraph.widgets.ITmfTimeGraphDr
 import org.eclipse.tracecompass.tmf.ui.widgets.timegraph.widgets.TimeGraphControl;
 
 import com.google.common.collect.ImmutableMap;
+
+//import com.google.common.collect.ImmutableMap;
 
 /**
  * Span life presentation provider
@@ -84,7 +88,7 @@ public class SpanLifePresentationProvider extends TimeGraphPresentationProvider 
 
     @Override
     public StateItem[] getStateTable() {
-        return STATE_TABLE;
+        return ArrayUtils.addAll(STATE_TABLE, FlameViewPalette.getInstance().getStateTable());
     }
 
     @Override
@@ -142,9 +146,15 @@ public class SpanLifePresentationProvider extends TimeGraphPresentationProvider 
         }
         if ((event instanceof TimeEvent) && ((TimeEvent) event).getValue() != Integer.MIN_VALUE) {
             if ((event.getEntry() instanceof TimeGraphEntry) && (((TimeGraphEntry) event.getEntry()).getModel() instanceof SpanLifeEntryModel)) {
-                String processName = ((SpanLifeEntryModel) ((TimeGraphEntry) event.getEntry()).getModel()).getProcessName();
-                // We want a random color but that is the same for 2 spans of the same service
-                return Math.abs(Objects.hash(processName)) % 5;
+                SpanLifeEntryModel entryModel = ((SpanLifeEntryModel) ((TimeGraphEntry) event.getEntry()).getModel());
+                if (entryModel.getType() == SpanLifeEntryModel.EntryType.SPAN) {
+                    String processName = entryModel.getProcessName();
+                    // We want a random color but that is the same for 2 spans of the same service
+                    return Math.abs(Objects.hash(processName)) % 5;
+                }
+                if (entryModel.getType() == SpanLifeEntryModel.EntryType.KERNEL) {
+                    return STATE_TABLE.length + FlameViewPalette.getInstance().getControlFlowIndex(event);
+                }
             }
             return 0;
         }

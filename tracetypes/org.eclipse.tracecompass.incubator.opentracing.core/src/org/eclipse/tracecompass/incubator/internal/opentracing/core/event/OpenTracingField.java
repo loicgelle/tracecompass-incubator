@@ -94,7 +94,8 @@ public class OpenTracingField {
             for (int i = 0; i < refs.size(); i++) {
                 String key = Objects.requireNonNull(refs.get(i).getAsJsonObject().get(IOpenTracingConstants.REFERENCE_TYPE).getAsString());
                 JsonElement element = Objects.requireNonNull(refs.get(i).getAsJsonObject().get(IOpenTracingConstants.SPAN_ID));
-                String value = String.valueOf(element.isJsonPrimitive() ? element.getAsJsonPrimitive().getAsString() : element.toString());
+                String value = String.valueOf(element.isJsonPrimitive() ? element.getAsJsonPrimitive().getAsString() : element.toString())
+                                     .replace("\n", " ");
                 fieldsMap.put(IOpenTracingConstants.REFERENCES + '/' + key, value);
             }
         }
@@ -122,7 +123,8 @@ public class OpenTracingField {
                 for (int j = 0; j < fields.size(); j++) {
                     String key = Objects.requireNonNull(fields.get(j).getAsJsonObject().get(IOpenTracingConstants.KEY).getAsString());
                     JsonElement element = Objects.requireNonNull(fields.get(j).getAsJsonObject().get(IOpenTracingConstants.VALUE));
-                    String value = String.valueOf(element.isJsonPrimitive() ? element.getAsJsonPrimitive().getAsString() : element.toString());
+                    String value = String.valueOf(element.isJsonPrimitive() ? element.getAsJsonPrimitive().getAsString() : element.toString())
+                                         .replace("\n", " ");
                     fieldsList.put(key, value);
                 }
                 timestampList.put(timestamp.longValue(), fieldsList);

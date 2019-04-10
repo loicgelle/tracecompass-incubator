@@ -10,8 +10,13 @@
 package org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife;
 
 import java.util.List;
+import java.util.Objects;
 
+import org.eclipse.tracecompass.tmf.core.model.IFilterableDataModel;
 import org.eclipse.tracecompass.tmf.core.model.timegraph.TimeGraphEntryModel;
+
+import com.google.common.collect.HashMultimap;
+import com.google.common.collect.Multimap;
 
 /**
  * {@link TimeGraphEntryModel} for the Span life data provider
@@ -19,7 +24,11 @@ import org.eclipse.tracecompass.tmf.core.model.timegraph.TimeGraphEntryModel;
  * @author Katherine Nadeau
  *
  */
-public class SpanLifeEntryModel extends TimeGraphEntryModel {
+public class SpanLifeEntryModel extends TimeGraphEntryModel implements IFilterableDataModel {
+
+    public enum EntryType {
+        SPAN, KERNEL
+    }
 
     /**
      * Log event
@@ -66,6 +75,12 @@ public class SpanLifeEntryModel extends TimeGraphEntryModel {
 
     private final String fProcessName;
 
+    private final Integer fTid;
+
+    private final EntryType fType;
+
+    private final String fHostId;
+
     /**
      * Constructor
      *
@@ -85,12 +100,21 @@ public class SpanLifeEntryModel extends TimeGraphEntryModel {
      *            true if the span has an error tag
      * @param processName
      *            process name
+     * @param tid
+     *            process TID
+     * @param type
+     *            Entry type (kernel or span)
+     * @param hostId
+     *            Host ID
      */
-    public SpanLifeEntryModel(long id, long parentId, String name, long startTime, long endTime, List<LogEvent> logs, boolean errorTag, String processName) {
-        super(id, parentId, name, startTime, endTime);
+    public SpanLifeEntryModel(long id, long parentId, String name, long startTime, long endTime, List<LogEvent> logs, boolean errorTag, String processName, Integer tid, EntryType type, String hostId) {
+        super(id, parentId, "[" + String.valueOf(tid) + "] " + name, startTime, endTime);
         fLogs = logs;
         fErrorTag = errorTag;
-        fProcessName= processName;
+        fProcessName = processName;
+        fTid = tid;
+        fType = type;
+        fHostId = hostId;
     }
 
     /**
@@ -118,6 +142,42 @@ public class SpanLifeEntryModel extends TimeGraphEntryModel {
      */
     public String getProcessName() {
         return fProcessName;
+    }
+
+    /**
+     * Getter for the TID
+     *
+     * @return the TID of the process of the span
+     */
+    public Integer getTid() {
+        return fTid;
+    }
+
+    /**
+     * Getter for the type
+     *
+     * @return the type of the entry
+     */
+    public EntryType getType() {
+        return fType;
+    }
+
+    /**
+     * Getter for the type
+     *
+     * @return the host ID
+     */
+    public String getHostId() {
+        return fHostId;
+    }
+
+    @Override
+    public Multimap<String, String> getMetadata() {
+        // TODO Auto-generated method stub
+        Multimap<String, String> fAspects = HashMultimap.create();
+        fAspects.put(Objects.requireNonNull(org.eclipse.tracecompass.analysis.os.linux.core.event.aspect.Messages.AspectName_Tid),
+                String.valueOf(getTid()));
+        return fAspects;
     }
 
 }

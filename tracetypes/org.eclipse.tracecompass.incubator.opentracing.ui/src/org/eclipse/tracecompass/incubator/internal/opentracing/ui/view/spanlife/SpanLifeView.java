@@ -16,13 +16,18 @@ import java.util.Objects;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.jdt.annotation.NonNull;
 import org.eclipse.jdt.annotation.Nullable;
+import org.eclipse.jface.action.IMenuManager;
+import org.eclipse.jface.viewers.ISelection;
+import org.eclipse.jface.viewers.StructuredSelection;
 import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.graphics.RGBA;
+import org.eclipse.tracecompass.analysis.os.linux.core.model.HostThread;
 import org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife.SpanLifeAnalysis;
 import org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife.SpanLifeDataProvider;
 import org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife.SpanLifeEntryModel;
 import org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife.SpanLifeEntryModel.LogEvent;
 import org.eclipse.tracecompass.incubator.internal.opentracing.ui.Activator;
+import org.eclipse.tracecompass.internal.analysis.os.linux.ui.actions.FollowThreadAction;
 import org.eclipse.tracecompass.tmf.core.model.timegraph.ITimeGraphEntryModel;
 import org.eclipse.tracecompass.tmf.core.trace.ITmfTrace;
 import org.eclipse.tracecompass.tmf.core.trace.experiment.TmfExperiment;
@@ -104,6 +109,27 @@ public class SpanLifeView extends BaseDataProviderTimeGraphView {
     @Override
     protected void buildEntryList(@NonNull ITmfTrace trace, @NonNull ITmfTrace parentTrace, @NonNull IProgressMonitor monitor) {
         super.buildEntryList((parentTrace instanceof TmfExperiment) ? parentTrace : trace, parentTrace, monitor);
+    }
+
+    @Override
+    protected void fillTimeGraphEntryContextMenu(@NonNull IMenuManager menuManager) {
+        // TODO Auto-generated method stub
+        ISelection selection = getSite().getSelectionProvider().getSelection();
+        if (selection instanceof StructuredSelection) {
+            StructuredSelection sSel = (StructuredSelection) selection;
+            if (sSel.getFirstElement() instanceof TimeGraphEntry) {
+                TimeGraphEntry entry = (TimeGraphEntry) sSel.getFirstElement();
+                if (entry.getModel() instanceof SpanLifeEntryModel) {
+                    SpanLifeEntryModel entryModel = (SpanLifeEntryModel) entry.getModel();
+                    if (entryModel.getTid() > 0) {
+                        HostThread threadId = new HostThread(entryModel.getHostId(), entryModel.getTid());
+                        @SuppressWarnings("restriction")
+                        FollowThreadAction action = new FollowThreadAction(SpanLifeView.this, entryModel.getName(), threadId);
+                        menuManager.add(action);
+                    }
+                }
+            }
+        }
     }
 
 }

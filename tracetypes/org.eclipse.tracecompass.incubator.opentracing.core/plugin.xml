@@ -40,6 +40,12 @@
                class="org.eclipse.tracecompass.incubator.internal.opentracing.core.trace.OpenTracingExperiment">
          </tracetype>
       </module>
+      <parameterProvider
+            class="org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife.SpanLifeCriticalPathParameterProvider">
+         <analysisId
+               id="org.eclipse.tracecompass.analysis.graph.core.criticalpath">
+         </analysisId>
+      </parameterProvider>
    </extension>
    <extension
          point="org.eclipse.tracecompass.tmf.core.dataprovider">
