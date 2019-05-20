@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ***************************************************************************
+ * Copyright (c) 2019 Ecole Polytechnique de Montréal
+ *
+ * All rights reserved. This program and the accompanying materials are
+ * made available under the terms of the Eclipse Public License v1.0 which
+ * accompanies this distribution, and is available at
+ * http://www.eclipse.org/legal/epl-v10.html
+ *
+ * Contributors:
+ *   Loïc Gelle - Initial implementation
+ *************************************************************************** -->
+<tmfxml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:noNamespaceSchemaLocation="../../../org.eclipse.tracecompass.tmf.analysis.xml.core/src/org/eclipse/tracecompass/tmf/analysis/xml/core/module/xmlDefinition.xsd">
+<pattern version="0" id="opentracing.analysis.context">
+	<head>
+<!-- 		<traceType id="org.eclipse.tracecompass.incubator.opentracing.core" /> -->
+<!-- 		<traceType id="org.eclipse.linuxtools.lttng2.ust.tracetype" /> -->
+<!-- 		<traceType id="org.eclipse.linuxtools.lttng2.kernel.tracetype" /> -->
+		<traceType id="org.eclipse.linuxtools.tmf.core.experiment.generic" />
+		<label value="OpenTracing / LTTng Context Analysis" />
+		<viewLabelPrefix value="OT Context" />
+	</head>
+	
+	<patternHandler>
+		<test id="ot_ust_event_start_condition">
+            <if>
+            	<and>
+            		<condition>
+	                    <stateValue type="eventField" value="logger_name" />
+						<stateValue type="string" value="io.jaegertracing.internal.JaegerTracer" />
+	                </condition>
+	                <condition>
+	                    <stateValue type="eventField" value="method_name" />
+						<stateValue type="string" value="start" />
+	                </condition>
+            	</and>
+            </if>
+        </test>
+        
+		<test id="thread_condition">
+            <if>
+            	<and>
+            		<condition>
+	                    <stateValue type="eventField" value="tid" />
+	                    <stateValue type="query">
+	                        <stateAttribute type="constant" value="#CurrentScenario" />
+	                        <stateAttribute type="constant" value="thread" />
+	                    </stateValue>
+	                </condition>
+	                <condition>
+	                    <stateValue type="eventField" value="logger_name" />
+						<stateValue type="string" value="io.jaegertracing.internal.JaegerTracer" />
+	                </condition>
+	                <condition>
+	                    <stateValue type="eventField" value="method_name" />
+						<stateValue type="string" value="finishWithDuration" />
+	                </condition>
+            	</and>
+            </if>
+        </test>
+        
+		<action id="ot_ust_context_start">
+	        <stateChange>
+	            <stateAttribute type="constant" value="#CurrentScenario" />
+	            <stateAttribute type="constant" value="ot_ust_context" />
+	            <stateAttribute type="constant" value="name" />
+				<stateValue type="script" value="msg.split(':').slice(0, 2).join(':')" scriptEngine="nashorn" >
+					<stateValue id="msg" type="eventField" value="msg" />
+				</stateValue>
+	        </stateChange>
+	        <stateChange>
+	            <stateAttribute type="constant" value="#CurrentScenario" />
+	            <stateAttribute type="constant" value="thread" />
+	            <stateValue type="eventField" value="tid" />
+	        </stateChange>
+	    </action>
+	    
+	    <action id="ot_ust_context_finish">
+            <segment>
+                <segType>
+                    <segName>
+                        <stateValue type="query">
+                            <stateAttribute type="constant" value="#CurrentScenario" />
+                            <stateAttribute type="constant" value="ot_ust_context" />
+                            <stateAttribute type="constant" value="name" />
+                        </stateValue>
+                    </segName>
+                </segType>
+                <segContent>
+                	<segField name="TID" type="string">
+						<stateValue type="query">
+							<stateAttribute type="constant" value="#CurrentScenario" />
+							<stateAttribute type="constant" value="thread" />
+						</stateValue>
+					</segField>
+                </segContent>
+            </segment>
+        </action>
+        
+		<fsm id="ot_ust_context" initial="start">
+		    <state id="start">
+		        <transition event="lttng_jul:event" cond="ot_ust_event_start_condition" target="in_progress" action="ot_ust_context_start" />
+		    </state>
+		    <state id="in_progress" >
+		        <transition event="lttng_jul:event" cond="thread_condition" target="end" action="ot_ust_context_finish" />
+		    </state>
+		    <final id="end" />
+		</fsm>
+	</patternHandler>
+</pattern>
+</tmfxml>

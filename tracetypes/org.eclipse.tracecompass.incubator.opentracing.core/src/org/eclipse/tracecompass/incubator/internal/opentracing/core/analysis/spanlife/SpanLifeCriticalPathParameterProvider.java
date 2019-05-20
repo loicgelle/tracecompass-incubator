@@ -93,4 +93,8 @@ public class SpanLifeCriticalPathParameterProvider extends TmfAbstractAnalysisPa
         return fInstance;
     }
 
+    public void resetParameter() {
+        fCurrentHostThread = null;
+    }
+
 }

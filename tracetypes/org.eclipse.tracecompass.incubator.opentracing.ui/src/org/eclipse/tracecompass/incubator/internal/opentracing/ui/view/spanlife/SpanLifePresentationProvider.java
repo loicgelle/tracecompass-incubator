@@ -22,16 +22,19 @@ import org.eclipse.jdt.annotation.NonNull;
 import org.eclipse.jdt.annotation.Nullable;
 import org.eclipse.swt.graphics.RGB;
 import org.eclipse.swt.graphics.RGBA;
-import org.eclipse.tracecompass.incubator.internal.callstack.ui.FlameViewPalette;
 import org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife.SpanLifeEntryModel;
+import org.eclipse.tracecompass.internal.analysis.graph.ui.criticalpath.view.CriticalPathPresentationProvider;
+import org.eclipse.tracecompass.internal.analysis.graph.ui.criticalpath.view.CriticalPathPresentationProvider.State;
 import org.eclipse.tracecompass.tmf.core.model.filters.SelectionTimeQueryFilter;
 import org.eclipse.tracecompass.tmf.core.model.timegraph.ITimeGraphDataProvider;
 import org.eclipse.tracecompass.tmf.core.model.timegraph.TimeGraphEntryModel;
 import org.eclipse.tracecompass.tmf.core.presentation.IYAppearance;
+import org.eclipse.tracecompass.tmf.core.presentation.RGBAColor;
 import org.eclipse.tracecompass.tmf.core.response.TmfModelResponse;
 import org.eclipse.tracecompass.tmf.ui.views.timegraph.BaseDataProviderTimeGraphView;
 import org.eclipse.tracecompass.tmf.ui.widgets.timegraph.StateItem;
 import org.eclipse.tracecompass.tmf.ui.widgets.timegraph.TimeGraphPresentationProvider;
+import org.eclipse.tracecompass.tmf.ui.widgets.timegraph.model.ILinkEvent;
 import org.eclipse.tracecompass.tmf.ui.widgets.timegraph.model.ITimeEvent;
 import org.eclipse.tracecompass.tmf.ui.widgets.timegraph.model.ITimeEventStyleStrings;
 import org.eclipse.tracecompass.tmf.ui.widgets.timegraph.model.ITimeGraphEntry;
@@ -76,8 +79,84 @@ public class SpanLifePresentationProvider extends TimeGraphPresentationProvider 
                     ImmutableMap.of(ITimeEventStyleStrings.label(), MESSAGE, ITimeEventStyleStrings.fillColor(), MARKER_COLOR_INT, ITimeEventStyleStrings.symbolStyle(), IYAppearance.SymbolStyle.CIRCLE, ITimeEventStyleStrings.heightFactor(), 0.3f)),
             new StateItem(ImmutableMap.of(ITimeEventStyleStrings.label(), STACK, ITimeEventStyleStrings.fillColor(), MARKER_COLOR_INT, ITimeEventStyleStrings.symbolStyle(), IYAppearance.SymbolStyle.SQUARE,
                     ITimeEventStyleStrings.heightFactor(), 0.3f)),
-            new StateItem(ImmutableMap.of(ITimeEventStyleStrings.label(), OTHER, ITimeEventStyleStrings.fillColor(), MARKER_COLOR_INT, ITimeEventStyleStrings.symbolStyle(), FLAG_EMOJI, ITimeEventStyleStrings.heightFactor(), 0.3f))
+            new StateItem(ImmutableMap.of(ITimeEventStyleStrings.label(), OTHER, ITimeEventStyleStrings.fillColor(), MARKER_COLOR_INT, ITimeEventStyleStrings.symbolStyle(), FLAG_EMOJI, ITimeEventStyleStrings.heightFactor(), 0.3f)),
+            new StateItem(new RGB(175, 175, 175), "Blocked in critical path"), //$NON-NLS-1$
+            new StateItem(
+                    ImmutableMap.of(ITimeEventStyleStrings.heightFactor(), 0.1f,
+                            ITimeEventStyleStrings.itemTypeProperty(), ITimeEventStyleStrings.linkType(),
+                            ITimeEventStyleStrings.fillStyle(), ITimeEventStyleStrings.solidColorFillStyle(),
+                            ITimeEventStyleStrings.fillColor(), new RGBAColor(0, 0, 0).toInt()))
     };
+
+    public static final int NETWORK_ARROW_INDEX_1;
+    public static final int UNKNOWN_ARROW_INDEX_1;
+    public static final StateItem[] CP_STATE_TABLE_1;
+    static {
+        int networkArrowIndex = -1;
+        int unknownNetworkIndex = -1;
+        CP_STATE_TABLE_1 = new StateItem[State.values().length];
+        for (int i = 0; i < CP_STATE_TABLE_1.length; i++) {
+            State state = State.values()[i];
+
+            float heightFactor = 1.0f;
+            if (state.equals(State.NETWORK_ARROW)) {
+                networkArrowIndex = i;
+                heightFactor = 0.1f;
+            } else if (state.equals(State.UNKNOWN_ARROW)) {
+                unknownNetworkIndex = i;
+                heightFactor = 0.1f;
+            }
+
+            RGB stateColor = state.rgb;
+            String stateType = state.equals(State.NETWORK_ARROW) || state.equals(State.UNKNOWN_ARROW) ? ITimeEventStyleStrings.linkType() : ITimeEventStyleStrings.stateType();
+            ImmutableMap<String, Object> styleMap = ImmutableMap.of(
+                    ITimeEventStyleStrings.fillStyle(), ITimeEventStyleStrings.solidColorFillStyle(),
+                    ITimeEventStyleStrings.fillColor(), new RGBAColor(stateColor.red, stateColor.green, stateColor.blue).toInt(),
+                    ITimeEventStyleStrings.label(), String.valueOf(state.toString()),
+                    ITimeEventStyleStrings.heightFactor(), heightFactor,
+                    ITimeEventStyleStrings.itemTypeProperty(), stateType
+                    );
+            CP_STATE_TABLE_1[i] = new StateItem(styleMap);
+        }
+
+        NETWORK_ARROW_INDEX_1 = networkArrowIndex;
+        UNKNOWN_ARROW_INDEX_1 = unknownNetworkIndex;
+    }
+
+    public static final int NETWORK_ARROW_INDEX_2;
+    public static final int UNKNOWN_ARROW_INDEX_2;
+    public static final StateItem[] CP_STATE_TABLE_2;
+    static {
+        int networkArrowIndex = -1;
+        int unknownNetworkIndex = -1;
+        CP_STATE_TABLE_2 = new StateItem[State.values().length];
+        for (int i = 0; i < CP_STATE_TABLE_2.length; i++) {
+            State state = State.values()[i];
+
+            float heightFactor = 1.0f;
+            if (state.equals(State.NETWORK_ARROW)) {
+                networkArrowIndex = i;
+                heightFactor = 0.1f;
+            } else if (state.equals(State.UNKNOWN_ARROW)) {
+                unknownNetworkIndex = i;
+                heightFactor = 0.1f;
+            }
+
+            RGB stateColor = state.rgb;
+            String stateType = state.equals(State.NETWORK_ARROW) || state.equals(State.UNKNOWN_ARROW) ? ITimeEventStyleStrings.linkType() : ITimeEventStyleStrings.stateType();
+            ImmutableMap<String, Object> styleMap = ImmutableMap.of(
+                    ITimeEventStyleStrings.fillStyle(), ITimeEventStyleStrings.solidColorFillStyle(),
+                    ITimeEventStyleStrings.fillColor(), new RGBAColor(stateColor.red, stateColor.green, stateColor.blue, 150).toInt(),
+                    ITimeEventStyleStrings.label(), String.valueOf(state.toString()),
+                    ITimeEventStyleStrings.heightFactor(), heightFactor,
+                    ITimeEventStyleStrings.itemTypeProperty(), stateType
+                    );
+            CP_STATE_TABLE_2[i] = new StateItem(ImmutableMap.copyOf(styleMap));
+        }
+
+        NETWORK_ARROW_INDEX_2 = networkArrowIndex;
+        UNKNOWN_ARROW_INDEX_2 = unknownNetworkIndex;
+    }
 
     /**
      * Constructor
@@ -88,7 +167,35 @@ public class SpanLifePresentationProvider extends TimeGraphPresentationProvider 
 
     @Override
     public StateItem[] getStateTable() {
-        return ArrayUtils.addAll(STATE_TABLE, FlameViewPalette.getInstance().getStateTable());
+        return ArrayUtils.addAll(STATE_TABLE,
+                ArrayUtils.addAll(CP_STATE_TABLE_1, CP_STATE_TABLE_2));
+    }
+
+    public int getCPStateTableIndex(@Nullable ITimeEvent event) {
+        if (event instanceof TimeEvent && ((TimeEvent) event).hasValue()) {
+            int value = ((TimeEvent) event).getValue();
+            if (value < getCPStateTableLength()) {
+                if (event instanceof ILinkEvent) {
+                    //return the right arrow item index
+                    return CP_STATE_TABLE_1[value]
+                                .getStateString()
+                                .equals(CriticalPathPresentationProvider.State.NETWORK.toString())
+                            ? NETWORK_ARROW_INDEX_1
+                                    : UNKNOWN_ARROW_INDEX_1;
+                }
+                return value;
+            }
+            if (event instanceof ILinkEvent) {
+                //return the right arrow item index
+                return CP_STATE_TABLE_2[value]
+                            .getStateString()
+                            .equals(CriticalPathPresentationProvider.State.NETWORK.toString())
+                        ? getCPStateTableLength() + NETWORK_ARROW_INDEX_2
+                                : getCPStateTableLength() + UNKNOWN_ARROW_INDEX_2;
+            }
+            return value;
+        }
+        return TRANSPARENT;
     }
 
     @Override
@@ -147,17 +254,30 @@ public class SpanLifePresentationProvider extends TimeGraphPresentationProvider 
         if ((event instanceof TimeEvent) && ((TimeEvent) event).getValue() != Integer.MIN_VALUE) {
             if ((event.getEntry() instanceof TimeGraphEntry) && (((TimeGraphEntry) event.getEntry()).getModel() instanceof SpanLifeEntryModel)) {
                 SpanLifeEntryModel entryModel = ((SpanLifeEntryModel) ((TimeGraphEntry) event.getEntry()).getModel());
+                if (event instanceof ILinkEvent) {
+                    return 11;
+                }
                 if (entryModel.getType() == SpanLifeEntryModel.EntryType.SPAN) {
                     String processName = entryModel.getProcessName();
                     // We want a random color but that is the same for 2 spans of the same service
                     return Math.abs(Objects.hash(processName)) % 5;
                 }
                 if (entryModel.getType() == SpanLifeEntryModel.EntryType.KERNEL) {
-                    return STATE_TABLE.length + FlameViewPalette.getInstance().getControlFlowIndex(event);
+                    if (event instanceof TimeEvent && ((TimeEvent) event).hasValue()) {
+                        int value = ((TimeEvent) event).getValue();
+                        if (value == -1) {
+                            return 10;
+                        }
+                    }
+                    return STATE_TABLE.length + getCPStateTableIndex(event);
                 }
             }
             return 0;
         }
         return -1;
+    }
+
+    public static int getCPStateTableLength() {
+        return State.values().length;
     }
 }

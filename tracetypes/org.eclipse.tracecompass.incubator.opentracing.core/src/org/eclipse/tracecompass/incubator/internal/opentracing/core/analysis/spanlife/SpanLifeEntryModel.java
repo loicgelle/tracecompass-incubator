@@ -12,7 +12,7 @@ package org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.sp
 import java.util.List;
 import java.util.Objects;
 
-import org.eclipse.tracecompass.tmf.core.model.IFilterableDataModel;
+import org.eclipse.tracecompass.tmf.core.model.timegraph.IElementResolver;
 import org.eclipse.tracecompass.tmf.core.model.timegraph.TimeGraphEntryModel;
 
 import com.google.common.collect.HashMultimap;
@@ -24,7 +24,7 @@ import com.google.common.collect.Multimap;
  * @author Katherine Nadeau
  *
  */
-public class SpanLifeEntryModel extends TimeGraphEntryModel implements IFilterableDataModel {
+public class SpanLifeEntryModel extends TimeGraphEntryModel implements IElementResolver {
 
     public enum EntryType {
         SPAN, KERNEL
@@ -81,6 +81,8 @@ public class SpanLifeEntryModel extends TimeGraphEntryModel implements IFilterab
 
     private final String fHostId;
 
+    private final String fSpanUID;
+
     /**
      * Constructor
      *
@@ -107,14 +109,17 @@ public class SpanLifeEntryModel extends TimeGraphEntryModel implements IFilterab
      * @param hostId
      *            Host ID
      */
-    public SpanLifeEntryModel(long id, long parentId, String name, long startTime, long endTime, List<LogEvent> logs, boolean errorTag, String processName, Integer tid, EntryType type, String hostId) {
-        super(id, parentId, "[" + String.valueOf(tid) + "] " + name, startTime, endTime);
+    public SpanLifeEntryModel(long id, long parentId, String name, long startTime, long endTime,
+                              List<LogEvent> logs, boolean errorTag, String processName,
+                              Integer tid, EntryType type, String hostId, String spanUID, String spanID) {
+        super(id, parentId, "[" + spanID + "] " + name, startTime, endTime);
         fLogs = logs;
         fErrorTag = errorTag;
         fProcessName = processName;
         fTid = tid;
         fType = type;
         fHostId = hostId;
+        fSpanUID = spanUID;
     }
 
     /**
@@ -177,6 +182,7 @@ public class SpanLifeEntryModel extends TimeGraphEntryModel implements IFilterab
         Multimap<String, String> fAspects = HashMultimap.create();
         fAspects.put(Objects.requireNonNull(org.eclipse.tracecompass.analysis.os.linux.core.event.aspect.Messages.AspectName_Tid),
                 String.valueOf(getTid()));
+        fAspects.put("SpanUID", fSpanUID);
         return fAspects;
     }
 

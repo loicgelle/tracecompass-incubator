@@ -11,18 +11,31 @@ package org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.sp
 
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.function.Consumer;
 
 import org.eclipse.jdt.annotation.NonNull;
+import org.eclipse.jdt.annotation.Nullable;
+import org.eclipse.tracecompass.analysis.graph.core.base.IGraphWorker;
+import org.eclipse.tracecompass.analysis.graph.core.base.TmfEdge;
+import org.eclipse.tracecompass.analysis.graph.core.base.TmfGraph;
+import org.eclipse.tracecompass.analysis.graph.core.base.TmfVertex;
+import org.eclipse.tracecompass.analysis.graph.core.base.TmfEdge.EdgeType;
 import org.eclipse.tracecompass.analysis.os.linux.core.event.aspect.LinuxTidAspect;
+import org.eclipse.tracecompass.analysis.os.linux.core.model.HostThread;
 import org.eclipse.tracecompass.incubator.internal.opentracing.core.event.IOpenTracingConstants;
+import org.eclipse.tracecompass.internal.analysis.graph.core.base.TmfGraphVisitor;
+import org.eclipse.tracecompass.internal.analysis.graph.ui.criticalpath.view.CriticalPathPresentationProvider.State;
+import org.eclipse.tracecompass.statesystem.core.ITmfStateSystem;
 import org.eclipse.tracecompass.statesystem.core.ITmfStateSystemBuilder;
 import org.eclipse.tracecompass.statesystem.core.exceptions.StateSystemDisposedException;
 import org.eclipse.tracecompass.statesystem.core.exceptions.StateValueTypeException;
@@ -44,11 +57,292 @@ import com.google.common.collect.Iterables;
  */
 public class SpanLifeStateProvider extends AbstractTmfStateProvider {
 
+    private final class CriticalPathVisitor extends TmfGraphVisitor {
+
+        private TmfGraph fGraph;
+        private HostThread fHostThread;
+        private ITmfStateSystemBuilder fSs;
+        private int fSpanQuark;
+        private int fCPQuark;
+        private long fStartTime;
+        private long fEndTime;
+        private boolean fStatesAdded;
+        private String fSpanUID;
+        private boolean fNotOnOwnCriticalPath = false;
+        private @Nullable String fPreviousSpanUID;
+        private @Nullable Long fLastOwnTimestamp;
+        private @Nullable Long fLastCPTimestamp;
+
+        public CriticalPathVisitor(ITmfStateSystemBuilder ss, TmfGraph graph, HostThread hostThread, int spanQuark, int cpQuark, String spanUID, long startTime, long endTime) {
+            fGraph = graph;
+            fHostThread = hostThread;
+            fSs = ss;
+            fSpanQuark = spanQuark;
+            fCPQuark = cpQuark;
+            fStartTime = startTime;
+            fEndTime = endTime;
+            fSpanUID = spanUID;
+            fStatesAdded = false;
+            fPreviousSpanUID = null;
+            fLastOwnTimestamp = null;
+            fLastCPTimestamp = null;
+        }
+
+        @Override
+        public void visit(TmfEdge edge, boolean horizontal) {
+            TmfVertex node = edge.getVertexFrom();
+            IGraphWorker worker = fGraph.getParentOf(node);
+            if (worker == null) {
+                return;
+            }
+            long startTs = node.getTs();
+            long duration = edge.getDuration();
+            long endTs = startTs + duration;
+            if (duration == 0) {
+                return;
+            }
+            Map<String, String> info = worker.getWorkerInformation();
+            String tid = info.get(
+                    Objects.requireNonNull(org.eclipse.tracecompass.analysis.os.linux.core.event.aspect.Messages.AspectName_Tid));
+            if (tid == null) {
+                return;
+            }
+            if (!horizontal) {
+                return;
+            }
+
+            String cpState = edge.getType().toString();
+            StringBuilder infoBuilder = new StringBuilder();
+            infoBuilder.append(tid);
+            infoBuilder.append("~");
+            infoBuilder.append(cpState);
+            infoBuilder.append("~");
+            if (tid.equals(String.valueOf(fHostThread.getTid()))) {
+                infoBuilder.append(String.valueOf(getCPMatchingState(edge.getType())));
+            } else {
+                infoBuilder.append(State.values().length
+                        + getCPMatchingState(edge.getType()));
+            }
+
+            if (startTs > fEndTime || startTs + duration < fStartTime) {
+                return;
+            }
+            long correctStartTs = (startTs < fStartTime) ? fStartTime : startTs;
+            long correctEndTs = (endTs > fEndTime) ? fEndTime : endTs;
+
+//            if (tid.equals(String.valueOf(fHostThread.getTid()))) {
+//                fSs.modifyAttribute(correctStartTs, infoBuilder.toString(), fSpanQuark);
+//                fSs.modifyAttribute(correctStartTs, cpState, fCPQuark);
+//                if (fNotOnOwnCriticalPath && fPreviousSpanUID != null && fLastCPTimestamp != null) {
+//                    long lastCPTimestamp = fLastCPTimestamp;
+//                    if (lastCPTimestamp >= correctStartTs) {
+//                        lastCPTimestamp = correctStartTs - 1;
+//                    }
+//                    int arrowQuark = fSs.getQuarkAbsoluteAndAdd(CP_ARROWS_ATTRIBUTE_IN, fSpanUID);
+//                    fSs.modifyAttribute(lastCPTimestamp, fPreviousSpanUID, arrowQuark);
+//                    fSs.modifyAttribute(correctStartTs, (Object) null, arrowQuark);
+//                }
+//                fStatesAdded = true;
+//                fNotOnOwnCriticalPath = false;
+//                fLastOwnTimestamp = correctEndTs;
+//                fPreviousSpanUID = fSpanUID;
+//            } else {
+//                int tidQuark = fSs.optQuarkAbsolute(TID_SPANS_ATTRIBUTE, tid);
+//                if (tidQuark != ITmfStateSystem.INVALID_ATTRIBUTE) {
+//                    try {
+//                        Iterable<ITmfStateInterval> intervals = fSs.query2D(Collections.singleton(tidQuark), correctStartTs, correctEndTs);
+//                        boolean subStatesAdded = false;
+//                        for (ITmfStateInterval interval : intervals) {
+//                            long correctSubStartTs = (interval.getStartTime() < correctStartTs) ? correctStartTs : interval.getStartTime();
+//                            long correctSubEndTs = (interval.getEndTime() > correctEndTs) ? correctEndTs : interval.getEndTime();
+//                            String nextSpanUID = interval.getValueString();
+//                            if (nextSpanUID != null) {
+//                                fSs.modifyAttribute(correctSubStartTs, String.valueOf(fHostThread.getTid()) + "~Blocked by another span~-1", fSpanQuark);
+//                                fSs.modifyAttribute(correctSubStartTs, BLOCKED_BY + nextSpanUID, fCPQuark);
+//                                if (!fNotOnOwnCriticalPath && fLastOwnTimestamp != null) {
+//                                    long lastOwnTimestamp = fLastOwnTimestamp;
+//                                    if (lastOwnTimestamp >= correctSubStartTs) {
+//                                        lastOwnTimestamp = correctSubStartTs - 1;
+//                                    }
+//                                    int arrowQuark = fSs.getQuarkAbsoluteAndAdd(CP_ARROWS_ATTRIBUTE_OUT, fSpanUID);
+//                                    fSs.modifyAttribute(lastOwnTimestamp, nextSpanUID, arrowQuark);
+//                                    fSs.modifyAttribute(correctSubStartTs, (Object) null, arrowQuark);
+//                                }
+//                                fNotOnOwnCriticalPath = true;
+//                                fLastCPTimestamp = correctSubEndTs;
+//                                fPreviousSpanUID = nextSpanUID;
+//                            } else {
+//                                if (!fNotOnOwnCriticalPath) {
+//                                    fSs.modifyAttribute(correctSubStartTs, infoBuilder.toString(), fSpanQuark);
+//                                    fSs.modifyAttribute(correctSubStartTs, BLOCKED + cpState, fCPQuark);
+//                                    fLastOwnTimestamp = correctSubEndTs;
+//                                }
+//                            }
+//                            subStatesAdded = true;
+//                            fStatesAdded = true;
+//                        }
+//                        if (!subStatesAdded) {
+//                            if (!fNotOnOwnCriticalPath) {
+//                                fSs.modifyAttribute(correctStartTs, infoBuilder.toString(), fSpanQuark);
+//                                fSs.modifyAttribute(correctStartTs, BLOCKED + cpState, fCPQuark);
+//                                fLastOwnTimestamp = correctEndTs;
+//                                fStatesAdded = true;
+//                            }
+//                        }
+//                    } catch (StateSystemDisposedException e) {
+//                        e.printStackTrace();
+//                    }
+//                } else {
+//                    if (!fNotOnOwnCriticalPath) {
+//                        fSs.modifyAttribute(correctStartTs, infoBuilder.toString(), fSpanQuark);
+//                        fSs.modifyAttribute(correctStartTs, BLOCKED + cpState, fCPQuark);
+//                        fNotOnOwnCriticalPath = false;
+//                        fLastOwnTimestamp = correctEndTs;
+//                        fPreviousSpanUID = fSpanUID;
+//                        fStatesAdded = true;
+//                    }
+//                }
+//            }
+
+            if (tid.equals(String.valueOf(fHostThread.getTid()))) {
+                int tidQuark = fSs.optQuarkAbsolute(TID_SPANS_ATTRIBUTE, tid);
+                if (tidQuark != ITmfStateSystem.INVALID_ATTRIBUTE) {
+                    try {
+                        Iterable<ITmfStateInterval> intervals = fSs.query2D(Collections.singleton(tidQuark), correctStartTs, correctEndTs);
+                        boolean subStatesAdded = false;
+                        for (ITmfStateInterval interval : intervals) {
+                            long correctSubStartTs = (interval.getStartTime() < correctStartTs) ? correctStartTs : interval.getStartTime();
+                            long correctSubEndTs = (interval.getEndTime() > correctEndTs) ? correctEndTs : interval.getEndTime();
+                            String nextSpanUID = interval.getValueString();
+                            if (nextSpanUID != null) {
+                                if (fSpanUID.equals(nextSpanUID)) {
+                                    fSs.modifyAttribute(correctSubStartTs, infoBuilder.toString(), fSpanQuark);
+                                    fSs.modifyAttribute(correctSubStartTs, cpState, fCPQuark);
+                                    if (fNotOnOwnCriticalPath && fPreviousSpanUID != null && fLastCPTimestamp != null) {
+                                        long lastCPTimestamp = fLastCPTimestamp;
+                                        if (lastCPTimestamp >= correctSubStartTs) {
+                                            lastCPTimestamp = correctSubStartTs - 1;
+                                        }
+                                        int arrowQuark = fSs.getQuarkAbsoluteAndAdd(CP_ARROWS_ATTRIBUTE_IN, fSpanUID);
+                                        fSs.modifyAttribute(lastCPTimestamp, fPreviousSpanUID, arrowQuark);
+                                        fSs.modifyAttribute(correctSubStartTs, (Object) null, arrowQuark);
+                                    }
+                                    fNotOnOwnCriticalPath = false;
+                                    fLastOwnTimestamp = correctSubEndTs;
+                                } else {
+                                    fSs.modifyAttribute(correctSubStartTs, String.valueOf(fHostThread.getTid()) + "~Blocked by another span~-1", fSpanQuark);
+                                    fSs.modifyAttribute(correctSubStartTs, BLOCKED_BY + nextSpanUID, fCPQuark);
+                                    if (!fNotOnOwnCriticalPath && fLastOwnTimestamp != null) {
+                                        long lastOwnTimestamp = fLastOwnTimestamp;
+                                        if (lastOwnTimestamp >= correctSubStartTs) {
+                                            lastOwnTimestamp = correctSubStartTs - 1;
+                                        }
+                                        int arrowQuark = fSs.getQuarkAbsoluteAndAdd(CP_ARROWS_ATTRIBUTE_OUT, fSpanUID);
+                                        fSs.modifyAttribute(lastOwnTimestamp, nextSpanUID, arrowQuark);
+                                        fSs.modifyAttribute(correctSubStartTs, (Object) null, arrowQuark);
+                                    }
+                                    fNotOnOwnCriticalPath = true;
+                                    fLastCPTimestamp = correctSubEndTs;
+                                }
+                                fPreviousSpanUID = nextSpanUID;
+                                subStatesAdded = true;
+                                fStatesAdded = true;
+                            } else {
+                                if (!fNotOnOwnCriticalPath) {
+                                    fSs.modifyAttribute(correctSubStartTs, infoBuilder.toString(), fSpanQuark);
+                                    fSs.modifyAttribute(correctSubStartTs, BLOCKED + cpState, fCPQuark);
+                                    fLastOwnTimestamp = correctSubEndTs;
+                                    subStatesAdded = true;
+                                    fStatesAdded = true;
+                                }
+                            }
+                        }
+                        if (!subStatesAdded) {
+                            if (!fNotOnOwnCriticalPath) {
+                                fSs.modifyAttribute(correctStartTs, infoBuilder.toString(), fSpanQuark);
+                                fSs.modifyAttribute(correctStartTs, BLOCKED + cpState, fCPQuark);
+                                fLastOwnTimestamp = correctEndTs;
+                                fStatesAdded = true;
+                            }
+                        }
+                    } catch (StateSystemDisposedException e) {
+                        e.printStackTrace();
+                    }
+                }
+            } else {
+                int tidQuark = fSs.optQuarkAbsolute(TID_SPANS_ATTRIBUTE, tid);
+                if (tidQuark != ITmfStateSystem.INVALID_ATTRIBUTE) {
+                    try {
+                        Iterable<ITmfStateInterval> intervals = fSs.query2D(Collections.singleton(tidQuark), correctStartTs, correctEndTs);
+                        boolean subStatesAdded = false;
+                        for (ITmfStateInterval interval : intervals) {
+                            long correctSubStartTs = (interval.getStartTime() < correctStartTs) ? correctStartTs : interval.getStartTime();
+                            long correctSubEndTs = (interval.getEndTime() > correctEndTs) ? correctEndTs : interval.getEndTime();
+                            String nextSpanUID = interval.getValueString();
+                            if (nextSpanUID != null) {
+                                fSs.modifyAttribute(correctSubStartTs, String.valueOf(fHostThread.getTid()) + "~Blocked by another span~-1", fSpanQuark);
+                                fSs.modifyAttribute(correctSubStartTs, BLOCKED_BY + nextSpanUID, fCPQuark);
+                                if (!fNotOnOwnCriticalPath && fLastOwnTimestamp != null) {
+                                    long lastOwnTimestamp = fLastOwnTimestamp;
+                                    if (lastOwnTimestamp >= correctSubStartTs) {
+                                        lastOwnTimestamp = correctSubStartTs - 1;
+                                    }
+                                    int arrowQuark = fSs.getQuarkAbsoluteAndAdd(CP_ARROWS_ATTRIBUTE_OUT, fSpanUID);
+                                    fSs.modifyAttribute(lastOwnTimestamp, nextSpanUID, arrowQuark);
+                                    fSs.modifyAttribute(correctSubStartTs, (Object) null, arrowQuark);
+                                }
+                                fNotOnOwnCriticalPath = true;
+                                fLastCPTimestamp = correctSubEndTs;
+                                fPreviousSpanUID = nextSpanUID;
+                            } else {
+                                if (!fNotOnOwnCriticalPath) {
+                                    fSs.modifyAttribute(correctSubStartTs, infoBuilder.toString(), fSpanQuark);
+                                    fSs.modifyAttribute(correctSubStartTs, BLOCKED + cpState, fCPQuark);
+                                    fLastOwnTimestamp = correctSubEndTs;
+                                }
+                            }
+                            subStatesAdded = true;
+                            fStatesAdded = true;
+                        }
+                        if (!subStatesAdded) {
+                            if (!fNotOnOwnCriticalPath) {
+                                fSs.modifyAttribute(correctStartTs, infoBuilder.toString(), fSpanQuark);
+                                fSs.modifyAttribute(correctStartTs, BLOCKED + cpState, fCPQuark);
+                                fLastOwnTimestamp = correctEndTs;
+                                fStatesAdded = true;
+                            }
+                        }
+                    } catch (StateSystemDisposedException e) {
+                        e.printStackTrace();
+                    }
+                } else {
+                    if (!fNotOnOwnCriticalPath) {
+                        fSs.modifyAttribute(correctStartTs, infoBuilder.toString(), fSpanQuark);
+                        fSs.modifyAttribute(correctStartTs, BLOCKED + cpState, fCPQuark);
+                        fNotOnOwnCriticalPath = false;
+                        fLastOwnTimestamp = correctEndTs;
+                        fPreviousSpanUID = fSpanUID;
+                        fStatesAdded = true;
+                    }
+                }
+            }
+        }
+
+        public boolean wereStatesAdded() {
+            return fStatesAdded;
+        }
+    }
+
     /**
      * Quark name for open tracing spans
      */
     public static final String OPEN_TRACING_ATTRIBUTE = "openTracingSpans"; //$NON-NLS-1$
-    public static final String CP_TIDS_ATTRIBUTE = "CriticalPathHostIDs"; //$NON-NLS-1$
+    public static final String TID_SPANS_ATTRIBUTE = "TIDToSpans"; //$NON-NLS-1$
+    public static final String CP_AGGREGATED_ATTRIBUTE = "CriticalPathsAggregated"; //$NON-NLS-1$
+    public static final String CP_ARROWS_ATTRIBUTE_IN = "CriticalPathsArrowsInBound"; //$NON-NLS-1$
+    public static final String CP_ARROWS_ATTRIBUTE_OUT = "CriticalPathsArrowsOutbound"; //$NON-NLS-1$
+    public static final String BLOCKED_BY = "Blocked by span "; //$NON-NLS-1$
+    public static final String BLOCKED = "[BLOCKED] "; //$NON-NLS-1$
 
     /**
      * Quark name for ust spans
@@ -69,7 +363,9 @@ public class SpanLifeStateProvider extends AbstractTmfStateProvider {
 
     private final Map<Integer, Long> fQuarkToEndTimestamp;
 
-    private final Map<Integer, Long> fCPQuarkToEndTimestamp;
+    private final Map<HostThread, TmfGraph> fCriticalPaths;
+
+    private @Nullable SpanLifeCriticalPathParameterProvider cpParamProvider;
 
     /**
      * Constructor
@@ -85,12 +381,13 @@ public class SpanLifeStateProvider extends AbstractTmfStateProvider {
         fStartSpanUSTEvents = new HashMap<>();
         fFinishSpanUSTEvents = new HashMap<>();
         fQuarkToEndTimestamp = new HashMap<>();
-        fCPQuarkToEndTimestamp = new HashMap<>();
         fTidToQuarks = new HashMap<>();
+        fCriticalPaths = new HashMap<>();
         fHandlers.put("OpenTracingSpan", this::handleAddSpanToQueue); //$NON-NLS-1$
         fHandlers.put("jaeger_ust:start_span", this::handleStartUSTEvent); //$NON-NLS-1$
         fHandlers.put("jaeger_ust:end_span", this::handleEndUSTEvent); //$NON-NLS-1$
         fHandlers.put("lttng_jul:event", this::handleUSTJulEvent); //$NON-NLS-1$
+        cpParamProvider = SpanLifeCriticalPathParameterProvider.getInstance();
     }
 
     @Override
@@ -132,10 +429,20 @@ public class SpanLifeStateProvider extends AbstractTmfStateProvider {
             return;
         }
         String spanUID = splitSpanID[0] + ':' + splitSpanID[1];
+        Integer tid = (Integer) TmfTraceUtils.resolveEventAspectOfClassForEvent(
+                event.getTrace(), LinuxTidAspect.class, event);
         if (methodName.equals("start")) { //$NON-NLS-1$
             fStartSpanUSTEvents.put(spanUID, event);
+            if (tid != null && ss != null) {
+                int quark = ss.getQuarkAbsoluteAndAdd(TID_SPANS_ATTRIBUTE, String.valueOf(tid));
+                ss.modifyAttribute(event.getTimestamp().toNanos(), spanUID, quark);
+            }
         } else if (methodName.equals("finishWithDuration")) { //$NON-NLS-1$
             fFinishSpanUSTEvents.put(spanUID, event);
+            if (tid != null && ss != null) {
+                int quark = ss.getQuarkAbsoluteAndAdd(TID_SPANS_ATTRIBUTE, String.valueOf(tid));
+                SpanLifeStateProvider.this.addFutureEvent(event.getTimestamp().toNanos(), (Object) null, quark);
+            }
         } else if (methodName.equals("log")) {
             if (splitMsg.length < 2 || ss == null) {
                 return;
@@ -151,7 +458,7 @@ public class SpanLifeStateProvider extends AbstractTmfStateProvider {
     private void handleSpan(ITmfEvent event, ITmfStateSystemBuilder ss) {
         long timestamp = event.getTimestamp().toNanos();
         Integer tid = 0;
-        String hostId = "";
+        String hostId = "0";
         Long duration = event.getContent().getFieldValue(Long.class, IOpenTracingConstants.DURATION);
         if (duration == null) {
             return;
@@ -166,13 +473,13 @@ public class SpanLifeStateProvider extends AbstractTmfStateProvider {
         String processName = event.getContent().getFieldValue(String.class, IOpenTracingConstants.PROCESS_NAME);
 
         int spanQuark;
-        Integer cpQuark = null;
         String name = String.valueOf(TmfTraceUtils.resolveAspectOfNameForEvent(event.getTrace(), "Name", event)); //$NON-NLS-1$
         String spanId = event.getContent().getFieldValue(String.class, IOpenTracingConstants.SPAN_ID);
 
         String spanUID = traceId + ':' + spanId;
         ITmfEvent startEvent = fStartSpanUSTEvents.get(spanUID);
         ITmfEvent finishEvent = fFinishSpanUSTEvents.get(spanUID);
+        HostThread hostThread = null;
         if (startEvent != null) {
             timestamp = startEvent.getTimestamp().toNanos();
             tid = (Integer) TmfTraceUtils.resolveEventAspectOfClassForEvent(
@@ -181,32 +488,24 @@ public class SpanLifeStateProvider extends AbstractTmfStateProvider {
                 tid = 0;
             } else {
                 hostId = startEvent.getTrace().getHostId();
-                cpQuark = ss.getQuarkAbsoluteAndAdd(CP_TIDS_ATTRIBUTE,
-                                                    tid + "/" + hostId);
-                ss.modifyAttribute(timestamp, 1, cpQuark);
+                hostThread = new HostThread(hostId, tid);
             }
         }
         if (finishEvent != null) {
             duration = finishEvent.getTimestamp().toNanos() - timestamp;
         }
-        if (cpQuark != null) {
-            final Long ts = timestamp;
-            final Long dur = duration;
-            fCPQuarkToEndTimestamp.merge(cpQuark, ts + dur,
-                    (k, v) -> v > ts + dur ? v : ts + dur);
-        }
 
         String refId = event.getContent().getFieldValue(String.class, IOpenTracingConstants.REFERENCES + "/CHILD_OF"); //$NON-NLS-1$
         if (refId == null) {
             spanQuark = ss.getQuarkRelativeAndAdd(openTracingSpansQuark,
-                    name + '/' + spanId + '/' + errorTag + '/' + processName + '/' + tid + '/' + hostId);
+                    name + '/' + spanUID + '/' + errorTag + '/' + processName + '/' + tid + '/' + hostId);
         } else {
             Integer parentQuark = fSpanMap.get(refId);
             if (parentQuark == null) {
                 return;
             }
             spanQuark = ss.getQuarkRelativeAndAdd(parentQuark,
-                    name + '/' + spanId + '/' + errorTag + '/' + processName + '/' + tid + '/' + hostId);
+                    name + '/' + spanUID + '/' + errorTag + '/' + processName + '/' + tid + '/' + hostId);
         }
 
         if (tid > 0) {
@@ -219,7 +518,14 @@ public class SpanLifeStateProvider extends AbstractTmfStateProvider {
             fTidToQuarks.put(tid,  quarksSet);
         }
 
-        ss.modifyAttribute(timestamp, String.valueOf(tid), spanQuark);
+        if (hostThread != null) {
+            prepareCriticalPath(hostThread);
+            if (!addCriticalPathStates(ss, spanQuark, hostThread, spanUID, timestamp, timestamp + duration)) {
+                ss.modifyAttribute(timestamp, String.valueOf(tid) + "~0~0", spanQuark);
+            }
+        } else {
+            ss.modifyAttribute(timestamp, "0~0~0", spanQuark);
+        }
 
         /*Map<Long, Map<String, String>> logs = event.getContent().getFieldValue(Map.class, IOpenTracingConstants.LOGS);
         if (logs != null) {
@@ -244,6 +550,30 @@ public class SpanLifeStateProvider extends AbstractTmfStateProvider {
         if (spanId != null) {
             fSpanMap.put(spanId, spanQuark);
         }
+    }
+
+    private boolean addCriticalPathStates(ITmfStateSystemBuilder ss, int spanQuark, HostThread hostThread, String spanUID, long startTime, long endTime) {
+        TmfGraph criticalPath = fCriticalPaths.get(hostThread);
+        if (criticalPath == null) {
+            return false;
+        }
+
+        TmfVertex start = criticalPath.getHead();
+        if (start == null) {
+            return false;
+        }
+        int cpQuark = ss.getQuarkAbsoluteAndAdd(CP_AGGREGATED_ATTRIBUTE, spanUID);
+        CriticalPathVisitor visitor = new CriticalPathVisitor(ss, criticalPath, hostThread, spanQuark,
+                                                              cpQuark, spanUID, startTime, endTime);
+        criticalPath.scanLineTraverse(start, visitor);
+        if (!visitor.wereStatesAdded()) {
+            ss.modifyAttribute(startTime, String.valueOf(hostThread.getTid()) + "~0~0", spanQuark);
+            ss.modifyAttribute(endTime, "UNKNOWN", cpQuark);
+        }
+        ss.modifyAttribute(endTime, (Object) null, spanQuark);
+        ss.modifyAttribute(endTime, (Object) null, cpQuark);
+
+        return false;
     }
 
     private void correctSpanRunningStatus(ITmfStateSystemBuilder ss, Integer tid,
@@ -309,6 +639,12 @@ public class SpanLifeStateProvider extends AbstractTmfStateProvider {
         String traceIdStr = traceId.toString(16);
         String spanUID = traceIdStr + ':' + Long.toHexString(spanIdLong);
         fStartSpanUSTEvents.put(spanUID, event);
+        Integer tid = (Integer) TmfTraceUtils.resolveEventAspectOfClassForEvent(
+                event.getTrace(), LinuxTidAspect.class, event);
+        if (tid != null) {
+            int quark = ss.getQuarkAbsoluteAndAdd(TID_SPANS_ATTRIBUTE, String.valueOf(tid));
+            ss.modifyAttribute(event.getTimestamp().toNanos(), spanUID, quark);
+        }
     }
 
     private void handleEndUSTEvent(ITmfEvent event) {
@@ -317,13 +653,13 @@ public class SpanLifeStateProvider extends AbstractTmfStateProvider {
             return;
         }
         String traceIdHigh = event.getContent().getFieldValue(String.class,
-                "trace_id_high");
+                                                              "trace_id_high");
         String traceIdLow = event.getContent().getFieldValue(String.class,
-                       "trace_id_low");
+                                                             "trace_id_low");
         String spanId = event.getContent().getFieldValue(String.class,
-                   "span_id");
+                                                         "span_id");
         if (spanId == null || traceIdHigh == null || traceIdLow == null) {
-        return;
+            return;
         }
         Long spanIdLong = Long.valueOf(spanId);
         BigInteger traceId = new BigInteger(traceIdHigh);
@@ -332,6 +668,19 @@ public class SpanLifeStateProvider extends AbstractTmfStateProvider {
         String traceIdStr = traceId.toString(16);
         String spanUID = traceIdStr + ':' + Long.toHexString(spanIdLong);
         fFinishSpanUSTEvents.put(spanUID, event);
+        Integer tid = (Integer) TmfTraceUtils.resolveEventAspectOfClassForEvent(
+                event.getTrace(), LinuxTidAspect.class, event);
+        if (tid != null) {
+            int quark = ss.getQuarkAbsoluteAndAdd(TID_SPANS_ATTRIBUTE, String.valueOf(tid));
+            SpanLifeStateProvider.this.addFutureEvent(event.getTimestamp().toNanos(), (Object) null, quark);
+        }
+    }
+
+    private void prepareCriticalPath(HostThread hostThread) {
+        if (!fCriticalPaths.containsKey(hostThread) && cpParamProvider != null) {
+            TmfGraph criticalPath = cpParamProvider.getCriticalPath(hostThread);
+            fCriticalPaths.put(hostThread, criticalPath);
+        }
     }
 
     @Override
@@ -344,8 +693,79 @@ public class SpanLifeStateProvider extends AbstractTmfStateProvider {
         for (Entry<Integer, Long> e : fQuarkToEndTimestamp.entrySet()) {
             ss.modifyAttribute(e.getValue(), (Object) null, e.getKey());
         }
-        for (Entry<Integer, Long> e : fCPQuarkToEndTimestamp.entrySet()) {
-            ss.modifyAttribute(e.getValue(), (Object) null, e.getKey());
+
+        if (cpParamProvider != null) {
+            cpParamProvider.resetParameter();
         }
+    }
+
+    private static int getCPMatchingState(EdgeType type) {
+        switch (type) {
+        case RUNNING:
+            return 0;
+        case INTERRUPTED:
+            return 1;
+        case PREEMPTED:
+            return 2;
+        case TIMER:
+            return 3;
+        case BLOCK_DEVICE:
+            return 4;
+        case USER_INPUT:
+            return 5;
+        case NETWORK:
+            return 6;
+        case IPI:
+            return 7;
+        case EPS:
+        case UNKNOWN:
+        case DEFAULT:
+        case BLOCKED:
+            break;
+        default:
+            break;
+        }
+        return 8;
+    }
+
+    public static String getSpanName(String attributeName) {
+        String[] attributeInfo = attributeName.split("/");  //$NON-NLS-1$
+        // The span name could contain a '/' character
+        return String.join("/",
+                Arrays.copyOfRange(attributeInfo, 0, attributeInfo.length - 5));
+    }
+
+    public static String getSpanId(String attributeName) {
+        String[] attributeInfo = attributeName.split("/");  //$NON-NLS-1$
+        return attributeInfo[attributeInfo.length - 5];
+    }
+
+    public static String getShortSpanId(String attributeName) {
+        String[] attributeInfo = attributeName.split("/");  //$NON-NLS-1$
+        String spanID = attributeInfo[attributeInfo.length - 5];
+        return spanID.split(":")[1];
+    }
+
+    public static Boolean getErrorTag(String attributeName) {
+        String[] attributeInfo = attributeName.split("/");  //$NON-NLS-1$
+        return attributeInfo[attributeInfo.length - 4].equals("true"); //$NON-NLS-1$
+    }
+
+    public static String getProcessName(String attributeName) {
+        String[] attributeInfo = attributeName.split("/");  //$NON-NLS-1$
+        return attributeInfo[attributeInfo.length - 3];
+    }
+
+    public static @Nullable Integer getTid(String attributeName) {
+        String[] attributeInfo = attributeName.split("/");  //$NON-NLS-1$
+        Integer tid = (attributeInfo.length > 5)
+                ? Integer.valueOf(attributeInfo[attributeInfo.length - 2])
+                : -1;
+        return (tid < 1) ? null : tid;
+    }
+
+    public static String getHostId(String attributeName) {
+        String[] attributeInfo = attributeName.split("/");  //$NON-NLS-1$
+        return attributeInfo[attributeInfo.length - 1];
     }
 }

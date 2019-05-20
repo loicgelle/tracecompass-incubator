@@ -44,6 +44,8 @@ import org.eclipse.tracecompass.incubator.analysis.core.concepts.IWeightedTreePr
 import org.eclipse.tracecompass.incubator.analysis.core.concepts.WeightedTree;
 import org.eclipse.tracecompass.incubator.analysis.core.concepts.IWeightedTreeProvider.MetricType;
 import org.eclipse.tracecompass.tmf.core.analysis.IAnalysisModule;
+import org.eclipse.tracecompass.tmf.core.model.IFilterableDataModel;
+import org.eclipse.tracecompass.tmf.core.signal.TmfDataModelSelectedSignal;
 import org.eclipse.tracecompass.tmf.core.signal.TmfSignalHandler;
 import org.eclipse.tracecompass.tmf.core.signal.TmfStartAnalysisSignal;
 import org.eclipse.tracecompass.tmf.core.signal.TmfWindowRangeUpdatedSignal;
@@ -54,6 +56,8 @@ import org.eclipse.tracecompass.tmf.ui.viewers.tree.ITmfTreeViewerEntry;
 import org.eclipse.tracecompass.tmf.ui.viewers.tree.TmfTreeColumnData;
 import org.eclipse.tracecompass.tmf.ui.viewers.tree.TmfTreeColumnData.ITmfColumnPercentageProvider;
 import org.eclipse.tracecompass.tmf.ui.viewers.tree.TmfTreeViewerEntry;
+
+import com.google.common.collect.Multimap;
 
 /**
  * An abstract tree viewer implementation for displaying a weighted tree
@@ -70,6 +74,7 @@ public class WeightedTreeViewer extends AbstractTmfTreeViewer {
     private Format fWeightFormatter = WeightedTreeView.DECIMAL_FORMATTER;
     private boolean fInitialized = false;
     private final WeightedTreeView fView;
+    private @Nullable List<ElementEntry> fEntries = null;
 
     private static final String[] DEFAULT_COLUMN_NAMES = new String[] {
             Objects.requireNonNull(Messages.WeightedTreeViewer_Element),
@@ -115,21 +120,66 @@ public class WeightedTreeViewer extends AbstractTmfTreeViewer {
                         Set<WeightedTree<?>> trees = new HashSet<>();
                         IWeightedTreeProvider<?, ?, WeightedTree<?>> treeProvider = null;
                         for (ITmfTreeViewerEntry entry : ((TmfTreeViewerEntry) selection).getChildren()) {
-                            // FIXME: Should we aggregate all children trees of all children elements?
+                            // FIXME: Should we aggregate all children trees of
+                            // all children elements?
                             if (!(entry instanceof TreeNodeEntry)) {
                                 continue;
                             }
                             trees.add(((TreeNodeEntry) entry).getTreeNode());
                             treeProvider = ((TreeNodeEntry) entry).fTreeProvider;
                         }
-                        // If there are no children, don't update current selection
+                        // If there are no children, don't update current
+                        // selection
                         if (treeProvider != null) {
                             fView.elementSelected(trees, treeProvider);
+                        }
+                        if (selection instanceof TreeNodeEntry) {
+                            TreeNodeEntry entry = (TreeNodeEntry) selection;
+                            Multimap<String, String> metadata = entry.fTreeNode.getBroadcastMetadata();
+                            if (!metadata.isEmpty()) {
+                                broadcast(new TmfDataModelSelectedSignal(WeightedTreeViewer.this, metadata));
+                            }
                         }
                     }
                 }
             }
         });
+    }
+
+    @TmfSignalHandler
+    public void selectionChanged(TmfDataModelSelectedSignal signal) {
+        // Ignore signal from self
+        if (signal.getSource() == this) {
+            return;
+        }
+        Multimap<@NonNull String, @NonNull String> metadata = signal.getMetadata();
+        if (fEntries != null) {
+            for (ElementEntry entry : fEntries) {
+                List<ITmfTreeViewerEntry> childrenEntries = entry.getChildren();
+                for (ITmfTreeViewerEntry child : childrenEntries) {
+                    if (child instanceof TreeNodeEntry) {
+                        TreeNodeEntry treeNode = (TreeNodeEntry) child;
+                        findEntryWithMetadata(treeNode, metadata);
+                    }
+                }
+            }
+        }
+    }
+
+    private void findEntryWithMetadata(TreeNodeEntry treeNode, Multimap<String, String> metadata) {
+        Multimap<String, String> nodeMetadata = treeNode.getTreeNode().getCaptureMetadata();
+        if (IFilterableDataModel.commonIntersect(nodeMetadata, metadata)) {
+            List<ITmfTreeViewerEntry> sel = new ArrayList<>();
+            sel.add(treeNode);
+            setSelection(sel);
+            return;
+        }
+        for (ITmfTreeViewerEntry entry : treeNode.getChildren()) {
+            if (entry instanceof TreeNodeEntry) {
+                TreeNodeEntry childNode = (TreeNodeEntry) entry;
+                findEntryWithMetadata(childNode, metadata);
+            }
+        }
     }
 
     /** Provides label for the Segment Store tree viewer cells */
@@ -579,11 +629,15 @@ public class WeightedTreeViewer extends AbstractTmfTreeViewer {
     private <@NonNull E> void setGlobalData(List<ITmfTreeViewerEntry> entryList, IWeightedTreeProvider<?, E, WeightedTree<?>> module) {
 
         Collection<E> elements = module.getElements();
+        List<ElementEntry> newEntries = new ArrayList<>();
 
         for (E element : elements) {
             ElementEntry<E> entry = new ElementEntry<>(element, module);
             entryList.add(entry);
+            newEntries.add(entry);
         }
+
+        fEntries = newEntries;
     }
 
     /**

@@ -33,8 +33,13 @@
             name="Spans Life">
          <tracetype
                applies="true"
-               class="org.eclipse.tracecompass.incubator.internal.opentracing.core.trace.OpenTracingTrace">
+               class="org.eclipse.tracecompass.incubator.internal.opentracing.core.trace.OpenTracingExperiment">
          </tracetype>
+      </module>
+      <module
+            analysis_module="org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife.SpanLifeCriticalPathAggregated"
+            id="org.eclipse.tracecompass.incubator.opentracing.analysis.spanlife.aggregated"
+            name="OpenTracing Critical Path Aggregated">
          <tracetype
                applies="true"
                class="org.eclipse.tracecompass.incubator.internal.opentracing.core.trace.OpenTracingExperiment">

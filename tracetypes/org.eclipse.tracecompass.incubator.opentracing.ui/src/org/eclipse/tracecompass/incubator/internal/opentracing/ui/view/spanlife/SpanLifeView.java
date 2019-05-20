@@ -16,12 +16,14 @@ import java.util.Objects;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.jdt.annotation.NonNull;
 import org.eclipse.jdt.annotation.Nullable;
+import org.eclipse.jface.action.Action;
 import org.eclipse.jface.action.IMenuManager;
 import org.eclipse.jface.viewers.ISelection;
 import org.eclipse.jface.viewers.StructuredSelection;
 import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.graphics.RGBA;
 import org.eclipse.tracecompass.analysis.os.linux.core.model.HostThread;
+import org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife.OTTraceSelectedSignal;
 import org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife.SpanLifeAnalysis;
 import org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife.SpanLifeDataProvider;
 import org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife.SpanLifeEntryModel;
@@ -31,6 +33,7 @@ import org.eclipse.tracecompass.internal.analysis.os.linux.ui.actions.FollowThre
 import org.eclipse.tracecompass.tmf.core.model.timegraph.ITimeGraphEntryModel;
 import org.eclipse.tracecompass.tmf.core.trace.ITmfTrace;
 import org.eclipse.tracecompass.tmf.core.trace.experiment.TmfExperiment;
+import org.eclipse.tracecompass.tmf.ui.views.TmfView;
 import org.eclipse.tracecompass.tmf.ui.views.timegraph.BaseDataProviderTimeGraphView;
 import org.eclipse.tracecompass.tmf.ui.widgets.timegraph.TimeGraphPresentationProvider;
 import org.eclipse.tracecompass.tmf.ui.widgets.timegraph.model.IMarkerEvent;
@@ -43,6 +46,56 @@ import org.eclipse.tracecompass.tmf.ui.widgets.timegraph.model.TimeGraphEntry;
  * @author Katherine Nadeau
  */
 public class SpanLifeView extends BaseDataProviderTimeGraphView {
+
+    private class FollowTraceAction extends Action {
+
+        private final TmfView fView;
+        private String fTraceID;
+
+        public FollowTraceAction(TmfView source, String traceId) {
+            fView = source;
+            fTraceID = traceId;
+        }
+
+        @Override
+        public String getText() {
+            return "Compute aggregated critical path statistics for " + fTraceID;
+        }
+
+        @Override
+        public void run() {
+            fView.broadcast(new OTTraceSelectedSignal(fView, fTraceID));
+            super.run();
+        }
+
+    }
+
+//    private class FollowSpanCPAction extends Action {
+//
+//        private final SpanLifeView fView;
+//        private final String fSpanUID;
+//
+//        public FollowSpanCPAction(SpanLifeView source, String spanUID) {
+//            fView = source;
+//            fSpanUID = spanUID;
+//        }
+//
+//        @Override
+//        public String getText() {
+//            return "Follow critical path for span " + fSpanUID;
+//        }
+//
+//        @Override
+//        public void run() {
+//            // TODO
+//            TraceCompassFilter filter = TraceCompassFilter.fromRegex(
+//                    Collections.singleton("arrows/" + fSpanUID), fView.getTrace());
+//            TmfFilterAppliedSignal signal = new TmfFilterAppliedSignal(fView, fView.getTrace(), filter);
+//            fView.regexFilterApplied(signal);
+//            super.run();
+//        }
+//
+//    }
 
     /**
      * Span life view Id
@@ -124,9 +177,16 @@ public class SpanLifeView extends BaseDataProviderTimeGraphView {
                     if (entryModel.getTid() > 0) {
                         HostThread threadId = new HostThread(entryModel.getHostId(), entryModel.getTid());
                         @SuppressWarnings("restriction")
-                        FollowThreadAction action = new FollowThreadAction(SpanLifeView.this, entryModel.getName(), threadId);
+                        FollowThreadAction action = new FollowThreadAction(SpanLifeView.this,
+                                                                           String.valueOf(threadId.getTid()),
+                                                                           threadId);
                         menuManager.add(action);
+//                        String spanUID = SpanLifeStateProvider.getSpanId(entry.getName());
+//                        FollowSpanCPAction actionCP = new FollowSpanCPAction(SpanLifeView.this, spanUID);
+//                        menuManager.add(actionCP);
                     }
+                } else {
+                    menuManager.add(new FollowTraceAction(SpanLifeView.this, entry.getName()));
                 }
             }
         }

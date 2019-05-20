@@ -16,6 +16,9 @@ import java.util.Map;
 import org.eclipse.jdt.annotation.NonNull;
 import org.eclipse.jdt.annotation.Nullable;
 
+import com.google.common.collect.LinkedHashMultimap;
+import com.google.common.collect.Multimap;
+
 /**
  * A Weighted Tree class to describe hierarchical data with a weight. This class
  * is a concrete class to describe a simple weighted tree, but it is also meant
@@ -39,6 +42,8 @@ public class WeightedTree<@NonNull T> implements Comparable<WeightedTree<T>> {
     private final Map<Object, WeightedTree<T>> fChildren = new HashMap<>();
     private @Nullable WeightedTree<T> fParent;
     private long fWeight = 0;
+    private Multimap<String, String> fBroadcastMetadata;
+    private Multimap<String, String> fCaptureMetadata;
 
     /**
      * Constructor
@@ -64,6 +69,22 @@ public class WeightedTree<@NonNull T> implements Comparable<WeightedTree<T>> {
         fObject = symbol;
         fParent = null;
         fWeight = initialWeight;
+        fBroadcastMetadata = LinkedHashMultimap.create();
+        fCaptureMetadata = LinkedHashMultimap.create();
+    }
+
+    public WeightedTree(T symbol, long initialWeight, Multimap<String, String> broadcastMetadata,
+            Multimap<String, String> captureMetadata) {
+        this(symbol, initialWeight);
+        fBroadcastMetadata = broadcastMetadata;
+        fCaptureMetadata = captureMetadata;
+    }
+
+    public WeightedTree(T symbol, Multimap<String, String> broadcastMetadata,
+                        Multimap<String, String> captureMetadata) {
+        this(symbol);
+        fBroadcastMetadata = broadcastMetadata;
+        fCaptureMetadata = captureMetadata;
     }
 
     /**
@@ -79,6 +100,14 @@ public class WeightedTree<@NonNull T> implements Comparable<WeightedTree<T>> {
         }
         fParent = copy.fParent;
         fWeight = copy.fWeight;
+        fBroadcastMetadata = LinkedHashMultimap.create();
+        fCaptureMetadata = LinkedHashMultimap.create();
+        for (Map.Entry<String, String> entry : copy.fBroadcastMetadata.entries()) {
+            fBroadcastMetadata.put(entry.getKey(), entry.getValue());
+        }
+        for (Map.Entry<String, String> entry : copy.fCaptureMetadata.entries()) {
+            fCaptureMetadata.put(entry.getKey(), entry.getValue());
+        }
     }
 
     /**
@@ -231,6 +260,14 @@ public class WeightedTree<@NonNull T> implements Comparable<WeightedTree<T>> {
     @Override
     public int compareTo(WeightedTree<@NonNull T> o) {
         return Long.compare(fWeight, o.fWeight);
+    }
+
+    public Multimap<String, String> getBroadcastMetadata() {
+        return fBroadcastMetadata;
+    }
+
+    public Multimap<String, String> getCaptureMetadata() {
+        return fCaptureMetadata;
     }
 
 }

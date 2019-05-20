@@ -10,14 +10,12 @@
 package org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.function.Predicate;
 
 import org.eclipse.core.runtime.IProgressMonitor;
@@ -25,8 +23,6 @@ import org.eclipse.jdt.annotation.NonNull;
 import org.eclipse.jdt.annotation.Nullable;
 import org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife.SpanLifeEntryModel.LogEvent;
 import org.eclipse.tracecompass.incubator.internal.opentracing.core.event.IOpenTracingConstants;
-import org.eclipse.tracecompass.internal.analysis.os.linux.core.threadstatus.ThreadEntryModel;
-import org.eclipse.tracecompass.internal.analysis.os.linux.core.threadstatus.ThreadStatusDataProvider;
 import org.eclipse.tracecompass.internal.tmf.core.model.filters.TimeGraphStateQueryFilter;
 import org.eclipse.tracecompass.internal.tmf.core.model.timegraph.AbstractTimeGraphDataProvider;
 import org.eclipse.tracecompass.statesystem.core.ITmfStateSystem;
@@ -34,13 +30,13 @@ import org.eclipse.tracecompass.statesystem.core.exceptions.AttributeNotFoundExc
 import org.eclipse.tracecompass.statesystem.core.exceptions.StateSystemDisposedException;
 import org.eclipse.tracecompass.statesystem.core.exceptions.TimeRangeException;
 import org.eclipse.tracecompass.statesystem.core.interval.ITmfStateInterval;
-import org.eclipse.tracecompass.tmf.core.dataprovider.DataProviderManager;
 import org.eclipse.tracecompass.tmf.core.model.CommonStatusMessage;
 import org.eclipse.tracecompass.tmf.core.model.filters.SelectionTimeQueryFilter;
 import org.eclipse.tracecompass.tmf.core.model.filters.TimeQueryFilter;
 import org.eclipse.tracecompass.tmf.core.model.timegraph.ITimeGraphArrow;
 import org.eclipse.tracecompass.tmf.core.model.timegraph.ITimeGraphRowModel;
 import org.eclipse.tracecompass.tmf.core.model.timegraph.ITimeGraphState;
+import org.eclipse.tracecompass.tmf.core.model.timegraph.TimeGraphArrow;
 import org.eclipse.tracecompass.tmf.core.model.timegraph.TimeGraphEntryModel;
 import org.eclipse.tracecompass.tmf.core.model.timegraph.TimeGraphRowModel;
 import org.eclipse.tracecompass.tmf.core.model.timegraph.TimeGraphState;
@@ -49,15 +45,16 @@ import org.eclipse.tracecompass.tmf.core.response.TmfModelResponse;
 import org.eclipse.tracecompass.tmf.core.response.ITmfResponse.Status;
 import org.eclipse.tracecompass.tmf.core.timestamp.TmfTimestamp;
 import org.eclipse.tracecompass.tmf.core.trace.ITmfTrace;
-import org.eclipse.tracecompass.tmf.core.trace.TmfTraceManager;
 
 import com.google.common.collect.ImmutableList.Builder;
+import com.google.common.collect.Multimap;
 import com.google.common.collect.TreeMultimap;
 
 /**
  * Data provider that will show the object lifespans.
  *
  * @author Katherine Nadeau
+ * @author Loïc Gelle
  *
  */
 @SuppressWarnings("restriction")
@@ -76,61 +73,7 @@ public class SpanLifeDataProvider extends AbstractTimeGraphDataProvider<@NonNull
      */
     public static final String SUFFIX = ".dataprovider"; //$NON-NLS-1$
 
-    private static class ThreadInfoRequest {
-        private final long fStart;
-        private final long fEnd;
-
-        public ThreadInfoRequest(long start, long end) {
-            fStart = start;
-            fEnd = end;
-        }
-
-        public boolean intersects(ITimeGraphState state) {
-            return !(state.getStartTime() > fEnd || (state.getStartTime() + state.getDuration()) < fStart);
-        }
-
-        public boolean precedes(ITimeGraphState state) {
-            return (state.getStartTime() + state.getDuration() < fEnd);
-        }
-
-        public ITimeGraphState sanitize(ITimeGraphState state) {
-            if (state.getStartTime() < fStart || state.getStartTime() + state.getDuration() > fEnd) {
-                long start = Math.max(state.getStartTime(), fStart);
-                long end = Math.min(state.getStartTime() + state.getDuration(), fEnd);
-                String label = state.getLabel();
-                if (label != null) {
-                    return new TimeGraphState(start, end - start, state.getValue(), label);
-                }
-                return new TimeGraphState(start, end - start, state.getValue());
-            }
-            return state;
-        }
-    }
-
-    private static class ThreadData {
-
-        private final ThreadStatusDataProvider fThreadDataProvider;
-        private final List<ThreadEntryModel> fThreadTree;
-        private final Status fStatus;
-
-        public ThreadData(ThreadStatusDataProvider dataProvider, List<ThreadEntryModel> threadTree, Status status) {
-            fThreadDataProvider = dataProvider;
-            fThreadTree = threadTree;
-            fStatus = status;
-        }
-
-        public @Nullable Map<String, String> fetchTooltip(ThreadEntryModel threadEntry, long time, @Nullable IProgressMonitor monitor) {
-            if (threadEntry.getStartTime() <= time && threadEntry.getEndTime() >= time) {
-                TmfModelResponse<Map<String, String>> tooltip = fThreadDataProvider.fetchTooltip(new SelectionTimeQueryFilter(Collections.singletonList(time), Collections.singleton(threadEntry.getId())), monitor);
-                return tooltip.getModel();
-            }
-            return null;
-        }
-
-    }
-
-    private @Nullable ThreadData fThreadData = null;
-    private Map<Integer, ThreadEntryModel> fTidToThreadEntry = new HashMap<>();
+    private Map<String, Long> fSpanUIDToEntryID;
 
     /**
      * Constructor
@@ -142,11 +85,57 @@ public class SpanLifeDataProvider extends AbstractTimeGraphDataProvider<@NonNull
      */
     public SpanLifeDataProvider(ITmfTrace trace, SpanLifeAnalysis analysisModule) {
         super(trace, analysisModule);
+        fSpanUIDToEntryID = new HashMap<>();
     }
 
     @Override
     public @NonNull TmfModelResponse<@NonNull List<@NonNull ITimeGraphArrow>> fetchArrows(@NonNull TimeQueryFilter filter, @Nullable IProgressMonitor monitor) {
-        return new TmfModelResponse<>(null, ITmfResponse.Status.COMPLETED, CommonStatusMessage.COMPLETED);
+        List<ITimeGraphArrow> arrows = new ArrayList<>();
+        ITmfStateSystem ss = getAnalysisModule().getStateSystem();
+        if (ss == null) {
+            return new TmfModelResponse<>(null, Status.COMPLETED, CommonStatusMessage.COMPLETED);
+        }
+
+        Collection<@NonNull Integer> arrowOutQuarks = ss.getQuarks(SpanLifeStateProvider.CP_ARROWS_ATTRIBUTE_OUT, "*");
+        try {
+            for (ITmfStateInterval arrowState : ss.query2D(arrowOutQuarks, filter.getStart(), filter.getEnd())) {
+                String spanToUID = arrowState.getValueString();
+                if (spanToUID == null) {
+                    continue;
+                }
+                String spanFromUID = ss.getAttributeName(arrowState.getAttribute());
+                Long entryFrom = fSpanUIDToEntryID.get(spanFromUID);
+                Long entryTo = fSpanUIDToEntryID.get(spanToUID);
+                if (entryFrom == null || entryTo == null) {
+                    continue;
+                }
+                arrows.add(new TimeGraphArrow(entryFrom, entryTo, arrowState.getStartTime(), arrowState.getEndTime() - arrowState.getStartTime(), -2));
+            }
+        } catch (IndexOutOfBoundsException | TimeRangeException | StateSystemDisposedException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+        Collection<@NonNull Integer> arrowInQuarks = ss.getQuarks(SpanLifeStateProvider.CP_ARROWS_ATTRIBUTE_IN, "*");
+        try {
+            for (ITmfStateInterval arrowState : ss.query2D(arrowInQuarks, filter.getStart(), filter.getEnd())) {
+                String spanFromUID = arrowState.getValueString();
+                if (spanFromUID == null) {
+                    continue;
+                }
+                String spanToUID = ss.getAttributeName(arrowState.getAttribute());
+                Long entryFrom = fSpanUIDToEntryID.get(spanFromUID);
+                Long entryTo = fSpanUIDToEntryID.get(spanToUID);
+                if (entryFrom == null || entryTo == null) {
+                    continue;
+                }
+                arrows.add(new TimeGraphArrow(entryFrom, entryTo, arrowState.getStartTime(), arrowState.getEndTime() - arrowState.getStartTime(), -2));
+            }
+        } catch (IndexOutOfBoundsException | TimeRangeException | StateSystemDisposedException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+
+        return new TmfModelResponse<>(arrows, Status.COMPLETED, CommonStatusMessage.COMPLETED);
     }
 
     @Override
@@ -174,17 +163,20 @@ public class SpanLifeDataProvider extends AbstractTimeGraphDataProvider<@NonNull
         try {
             Map<@NonNull String, @NonNull String> retMap = new HashMap<>();
 
-            /* Adds tooltip info for kernel states */
-            Integer tid = getTid(ss.getAttributeName(quarks.iterator().next()));
-            ThreadData threadData = fThreadData;
-            if (threadData != null && tid != null) {
-                ThreadEntryModel threadEntry = fTidToThreadEntry.get(tid);
-                if (threadEntry != null) {
-                    Map<String, String> tooltipInfo = threadData.fetchTooltip(threadEntry, filter.getStart(), monitor);
-                    if (tooltipInfo != null) {
-                        retMap.putAll(tooltipInfo);
-                    }
+            int quark = quarks.iterator().next();
+            String attrName = ss.getAttributeName(quark);
+            Integer tid = SpanLifeStateProvider.getTid(attrName);
+            if (tid != null) {
+                ITmfStateInterval interval = ss.querySingleState(hoverTime, quark);
+                String info = (String) interval.getValue();
+                if (info == null) {
+                    return new TmfModelResponse<>(null, ITmfResponse.Status.CANCELLED, CommonStatusMessage.TASK_CANCELLED);
                 }
+                String[] infoSpl = info.split("~");
+                Map<String, String> infoMap = new HashMap<>();
+                infoMap.put("TID", infoSpl[0]);
+                infoMap.put("State", infoSpl[1]);
+                return new TmfModelResponse<>(infoMap, Status.COMPLETED, CommonStatusMessage.COMPLETED);
             }
 
             if (spanLogQuark != ITmfStateSystem.INVALID_ATTRIBUTE) {
@@ -223,129 +215,47 @@ public class SpanLifeDataProvider extends AbstractTimeGraphDataProvider<@NonNull
         TreeMultimap<Integer, ITmfStateInterval> intervals = TreeMultimap.create(Comparator.naturalOrder(),
                 Comparator.comparing(ITmfStateInterval::getStartTime));
         Map<@NonNull Long, @NonNull Integer> entries = getSelectedEntries(filter);
-        Collection<Long> times = getTimes(filter, ss.getStartTime(), ss.getCurrentEndTime());
         /* Do the actual query */
-        for (ITmfStateInterval interval : ss.query2D(entries.values(), ss.getStartTime(), ss.getCurrentEndTime())) {
+        for (ITmfStateInterval interval : ss.query2D(entries.values(), filter.getStart(), filter.getEnd())) {
             if (monitor != null && monitor.isCanceled()) {
                 return Collections.emptyList();
             }
             intervals.put(interval.getAttribute(), interval);
         }
-        Map<@NonNull Integer, @NonNull Predicate<@NonNull Map<@NonNull String, @NonNull String>>> predicates = new HashMap<>();
+        Map<@NonNull Integer, @NonNull Predicate<@NonNull Multimap<@NonNull String, @NonNull String>>> predicates = new HashMap<>();
         if (filter instanceof TimeGraphStateQueryFilter) {
             TimeGraphStateQueryFilter timeEventFilter = (TimeGraphStateQueryFilter) filter;
             predicates.putAll(computeRegexPredicate(timeEventFilter));
         }
-        prepareKernelData(ss.getStartTime());
         List<@NonNull ITimeGraphRowModel> rows = new ArrayList<>();
+        Collection<Long> times = new ArrayList<>();
+        for (Long t : filter.getTimesRequested()) {
+            times.add(t);
+        }
         for (Map.Entry<@NonNull Long, @NonNull Integer> entry : entries.entrySet()) {
             if (monitor != null && monitor.isCanceled()) {
                 return Collections.emptyList();
             }
 
             int quark = entry.getValue();
-            String entryName = ss.getAttributeName(quark);
-            Integer tid = getTid(entryName);
 
             List<ITimeGraphState> eventList = new ArrayList<>();
             for (ITmfStateInterval interval : intervals.get(quark)) {
                 long startTime = interval.getStartTime();
                 long endTime = interval.getEndTime();
-                long duration = endTime - startTime + 1;
-                Object state = interval.getValue();
-                Builder<@NonNull ITimeGraphState> builder = new Builder<>();
-                if (state == null) {
+                long duration = endTime - startTime - 1;
+                String intervalState = interval.getValueString();
+                if (intervalState == null) {
                     continue;
                 }
-                if (tid == null || state.equals("0")) {
-                    builder.add(new TimeGraphState(startTime, duration, 0));
-                } else {
-                    if (!addKernelStates(builder, tid, startTime, endTime, times)) {
-                        // If kernel states are empty, replace with a span state
-                        builder.add(new TimeGraphState(startTime, duration, 0));
-                    }
-                }
-                for (ITimeGraphState value : builder.build()) {
-                    addToStateList(eventList, value, entry.getKey(), predicates, monitor);
-                }
+                String[] splitState = intervalState.split("~");
+                TimeGraphState state = new TimeGraphState(startTime, duration, Integer.valueOf(splitState[2]));
+                applyFilterAndAddState(eventList, state, entry.getKey(), predicates, monitor);
             }
             rows.add(new TimeGraphRowModel(entry.getKey(), eventList));
 
         }
         return rows;
-    }
-
-    private boolean addKernelStates(Builder<ITimeGraphState> builder, Integer tid, long startTime, long endTime, Collection<Long> times) {
-        boolean statesAdded = false;
-        ThreadData threadData = fThreadData;
-        if (threadData == null) {
-            return statesAdded;
-        }
-        List<ThreadEntryModel> tree = threadData.fThreadTree;
-
-        // FIXME: A callstack analysis may be for an experiment that span many hosts,
-        // the thread data provider will be a composite and the models may be for
-        // different host IDs. But for now, suppose the callstack is a composite also
-        // and the trace filtered the right host.
-        List<Long> threadModelIDs = new ArrayList<>();
-        for (ThreadEntryModel entryModel : tree) {
-            if (tid == entryModel.getThreadId()) {
-                fTidToThreadEntry.put(tid, entryModel);
-                threadModelIDs.add(entryModel.getId());
-                break;
-            }
-        }
-
-        List<Long> filteredTimes = new ArrayList<>();
-        for (long t : times) {
-            if (t >= startTime && t <= endTime) {
-                filteredTimes.add(t);
-            }
-        }
-        SelectionTimeQueryFilter tidFilter = new SelectionTimeQueryFilter(filteredTimes, threadModelIDs);
-        TmfModelResponse<List<ITimeGraphRowModel>> rowModel = threadData.fThreadDataProvider.fetchRowModel(tidFilter, null);
-        List<ITimeGraphRowModel> rowModels = rowModel.getModel();
-        if (rowModel.getStatus().equals(Status.CANCELLED) || rowModel.getStatus().equals(Status.FAILED) || rowModels == null) {
-            return statesAdded;
-        }
-
-        ThreadInfoRequest tInfo = new ThreadInfoRequest(startTime, endTime);
-        rowModels.get(0).getStates();
-        for (ITimeGraphRowModel m : rowModels) {
-            for (ITimeGraphState state : m.getStates()) {
-                if (tInfo.intersects(state)) {
-                    ITimeGraphState newState = tInfo.sanitize(state);
-                    statesAdded = statesAdded || true;
-                    builder.add(newState);
-                }
-                if (!tInfo.precedes(state)) {
-                    break;
-                }
-            }
-        }
-        return statesAdded;
-    }
-
-    private void prepareKernelData(long start) {
-        ThreadData data = fThreadData;
-        if (data != null && data.fStatus.equals(Status.COMPLETED)) {
-            return;
-        }
-        // FIXME: Wouldn't work correctly if trace is an experiment as it would cover
-        // many hosts
-        Set<ITmfTrace> tracesForHost = TmfTraceManager.getInstance().getOpenedTraces();
-        for (ITmfTrace trace : tracesForHost) {
-            ThreadStatusDataProvider dataProvider = DataProviderManager.getInstance().getDataProvider(trace, ThreadStatusDataProvider.ID, ThreadStatusDataProvider.class);
-            if (dataProvider != null) {
-                // Get the tree for the trace's current range
-                TmfModelResponse<List<ThreadEntryModel>> threadTreeResp = dataProvider.fetchTree(new TimeQueryFilter(start, Long.MAX_VALUE, 2), null);
-                List<ThreadEntryModel> threadTree = threadTreeResp.getModel();
-                if (threadTree != null) {
-                    fThreadData = new ThreadData(dataProvider, threadTree, threadTreeResp.getStatus());
-                    break;
-                }
-            }
-        }
     }
 
     @Override
@@ -410,15 +320,22 @@ public class SpanLifeDataProvider extends AbstractTimeGraphDataProvider<@NonNull
                     }
                 } catch (IndexOutOfBoundsException | TimeRangeException | StateSystemDisposedException e) {
                 }
-                Integer tid = getTid(childName);
+                Integer tid = SpanLifeStateProvider.getTid(childName);
                 if (tid == null) {
-                    builder.add(new SpanLifeEntryModel(childId, parentId, getSpanName(childName),
-                            ss.getStartTime(), ss.getCurrentEndTime(), logs, getErrorTag(childName),
-                            getProcessName(childName), 0, SpanLifeEntryModel.EntryType.SPAN, ""));
+                    builder.add(new SpanLifeEntryModel(childId, parentId, SpanLifeStateProvider.getSpanName(childName),
+                            ss.getStartTime(), ss.getCurrentEndTime(), logs, SpanLifeStateProvider.getErrorTag(childName),
+                            SpanLifeStateProvider.getProcessName(childName), 0,
+                            SpanLifeEntryModel.EntryType.SPAN, "",
+                            SpanLifeStateProvider.getSpanId(childName),
+                            SpanLifeStateProvider.getShortSpanId(childName)));
                 } else {
-                    builder.add(new SpanLifeEntryModel(childId, parentId, getSpanName(childName),
-                            ss.getStartTime(), ss.getCurrentEndTime(), logs, getErrorTag(childName),
-                            getProcessName(childName), tid, SpanLifeEntryModel.EntryType.KERNEL, getHostId(childName)));
+                    builder.add(new SpanLifeEntryModel(childId, parentId, SpanLifeStateProvider.getSpanName(childName),
+                            ss.getStartTime(), ss.getCurrentEndTime(), logs, SpanLifeStateProvider.getErrorTag(childName),
+                            SpanLifeStateProvider.getProcessName(childName), tid, SpanLifeEntryModel.EntryType.KERNEL,
+                            SpanLifeStateProvider.getHostId(childName),
+                            SpanLifeStateProvider.getSpanId(childName),
+                            SpanLifeStateProvider.getShortSpanId(childName)));
+                    fSpanUIDToEntryID.put(SpanLifeStateProvider.getSpanId(childName), childId);
                 }
                 addChildren(ss, builder, child, childId, logsQuarks);
             }
@@ -440,7 +357,7 @@ public class SpanLifeDataProvider extends AbstractTimeGraphDataProvider<@NonNull
             } catch (IndexOutOfBoundsException | TimeRangeException | StateSystemDisposedException e) {
             }
 
-            String spanId = getSpanId(childName);
+            String spanId = SpanLifeStateProvider.getSpanId(childName);
 
             int ustSpan;
             try {
@@ -448,16 +365,23 @@ public class SpanLifeDataProvider extends AbstractTimeGraphDataProvider<@NonNull
             } catch (AttributeNotFoundException e) {
                 return;
             }
-            Integer tid = getTid(childName);
+            Integer tid = SpanLifeStateProvider.getTid(childName);
             long childId = getId(ustSpan);
             if (tid == null) {
-                builder.add(new SpanLifeEntryModel(childId, parentId, getSpanName(childName),
+                builder.add(new SpanLifeEntryModel(childId, parentId, SpanLifeStateProvider.getSpanName(childName),
                         ss.getStartTime(), ss.getCurrentEndTime(), logs,
-                        getErrorTag(childName), getProcessName(childName), 0, SpanLifeEntryModel.EntryType.SPAN, ""));
+                        SpanLifeStateProvider.getErrorTag(childName), SpanLifeStateProvider.getProcessName(childName),
+                        0, SpanLifeEntryModel.EntryType.SPAN, "",
+                        SpanLifeStateProvider.getSpanId(childName),
+                        SpanLifeStateProvider.getShortSpanId(childName)));
             } else {
-                builder.add(new SpanLifeEntryModel(childId, parentId, getSpanName(childName),
-                        ss.getStartTime(), ss.getCurrentEndTime(), logs, getErrorTag(childName),
-                        getProcessName(childName), tid, SpanLifeEntryModel.EntryType.KERNEL, getHostId(childName)));
+                builder.add(new SpanLifeEntryModel(childId, parentId, SpanLifeStateProvider.getSpanName(childName),
+                        ss.getStartTime(), ss.getCurrentEndTime(), logs,
+                        SpanLifeStateProvider.getErrorTag(childName), SpanLifeStateProvider.getProcessName(childName),
+                        tid, SpanLifeEntryModel.EntryType.KERNEL, SpanLifeStateProvider.getHostId(childName),
+                        SpanLifeStateProvider.getSpanId(childName),
+                        SpanLifeStateProvider.getShortSpanId(childName)));
+                fSpanUIDToEntryID.put(SpanLifeStateProvider.getSpanId(childName), childId);
             }
             addUstChildren(ss, builder, child, ustQuark, childId, logsQuarks);
         }
@@ -465,46 +389,11 @@ public class SpanLifeDataProvider extends AbstractTimeGraphDataProvider<@NonNull
 
     private static int getLogQuark(ITmfStateSystem ss, String spanName, List<Integer> logsQuarks) {
         for (int logsQuark : logsQuarks) {
-            if (ss.getAttributeName(logsQuark).equals(getSpanId(spanName))) {
+            if (ss.getAttributeName(logsQuark).equals(SpanLifeStateProvider.getSpanId(spanName))) {
                 return logsQuark;
             }
         }
         return ITmfStateSystem.INVALID_ATTRIBUTE;
-    }
-
-    private static String getSpanName(String attributeName) {
-        String[] attributeInfo = attributeName.split("/");  //$NON-NLS-1$
-        // The span name could contain a '/' character
-        return String.join("/",
-                Arrays.copyOfRange(attributeInfo, 0, attributeInfo.length - 5));
-    }
-
-    private static String getSpanId(String attributeName) {
-        String[] attributeInfo = attributeName.split("/");  //$NON-NLS-1$
-        return attributeInfo[attributeInfo.length - 5];
-    }
-
-    private static Boolean getErrorTag(String attributeName) {
-        String[] attributeInfo = attributeName.split("/");  //$NON-NLS-1$
-        return attributeInfo[attributeInfo.length - 4].equals("true"); //$NON-NLS-1$
-    }
-
-    private static String getProcessName(String attributeName) {
-        String[] attributeInfo = attributeName.split("/");  //$NON-NLS-1$
-        return attributeInfo[attributeInfo.length - 3];
-    }
-
-    private static @Nullable Integer getTid(String attributeName) {
-        String[] attributeInfo = attributeName.split("/");  //$NON-NLS-1$
-        Integer tid = (attributeInfo.length > 5)
-                ? Integer.valueOf(attributeInfo[attributeInfo.length - 2])
-                : -1;
-        return (tid < 1) ? null : tid;
-    }
-
-    private static String getHostId(String attributeName) {
-        String[] attributeInfo = attributeName.split("/");  //$NON-NLS-1$
-        return attributeInfo[attributeInfo.length - 1];
     }
 
     private static String getLogType(String logs) {
@@ -527,4 +416,5 @@ public class SpanLifeDataProvider extends AbstractTimeGraphDataProvider<@NonNull
             return OTHER;
         }
     }
+
 }

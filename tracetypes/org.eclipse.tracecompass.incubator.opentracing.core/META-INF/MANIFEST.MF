@@ -22,7 +22,7 @@ Require-Bundle: org.eclipse.core.runtime,
  org.eclipse.tracecompass.analysis.os.linux.core,
  org.eclipse.tracecompass.statesystem.core
 Export-Package: org.eclipse.tracecompass.incubator.internal.opentracing.core;x-friends:="org.eclipse.tracecompass.incubator.opentracing.core.tests",
- org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife;x-friends:="org.eclipse.tracecompass.incubator.opentracing.core.tests,org.eclipse.tracecompass.incubator.opentracing.ui",
+ org.eclipse.tracecompass.incubator.internal.opentracing.core.analysis.spanlife;x-friends:="org.eclipse.tracecompass.incubator.opentracing.core.tests,org.eclipse.tracecompass.incubator.opentracing.ui,org.eclipse.tracecompass.incubator.kernel.ui",
  org.eclipse.tracecompass.incubator.internal.opentracing.core.event,
  org.eclipse.tracecompass.incubator.internal.opentracing.core.trace
 Automatic-Module-Name: org.eclipse.tracecompass.incubator.opentracing.core
@@ -30,4 +30,8 @@ Import-Package: org.eclipse.tracecompass.analysis.graph.core.base,
  org.eclipse.tracecompass.analysis.graph.core.criticalpath,
  org.eclipse.tracecompass.analysis.os.linux.core.event.aspect,
  org.eclipse.tracecompass.analysis.os.linux.core.model,
+ org.eclipse.tracecompass.incubator.analysis.core.concepts,
+ org.eclipse.tracecompass.internal.analysis.graph.core.base,
+ org.eclipse.tracecompass.internal.analysis.graph.ui,
+ org.eclipse.tracecompass.internal.analysis.graph.ui.criticalpath.view,
  org.eclipse.tracecompass.internal.analysis.os.linux.core.threadstatus
