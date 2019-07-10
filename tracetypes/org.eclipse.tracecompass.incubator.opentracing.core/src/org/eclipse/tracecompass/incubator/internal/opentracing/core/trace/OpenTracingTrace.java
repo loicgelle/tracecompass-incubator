@@ -10,13 +10,11 @@
 package org.eclipse.tracecompass.incubator.internal.opentracing.core.trace;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
@@ -47,20 +45,37 @@ import org.eclipse.tracecompass.tmf.core.trace.location.TmfLongLocation;
 
 import com.google.common.collect.Lists;
 import com.google.gson.Gson;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonSyntaxException;
+import com.google.gson.annotations.SerializedName;
 import com.google.gson.stream.JsonReader;
 
 /**
  * Open Tracing trace. Can read jaeger unsorted or sorted JSON traces.
  *
  * @author Katherine Nadeau
+ * @author Loïc Gelle
  *
  */
 public class OpenTracingTrace extends JsonTrace {
 
+    private class TraceFile {
+        @SerializedName("data")
+        public TraceData[] data;
+    }
+
+    private class TraceData {
+        @SerializedName("traceID")
+        public String traceID;
+
+        @SerializedName("spans")
+        public JsonObject[] spanData;
+    }
+
     private final @NonNull Iterable<@NonNull ITmfEventAspect<?>> fEventAspects;
     private final Map<String, String> fProcesses;
+
+    private HashMap<Long, String> fIndexToSpanData;
 
     /**
      * Constructor
@@ -69,6 +84,7 @@ public class OpenTracingTrace extends JsonTrace {
     public OpenTracingTrace() {
         fEventAspects = Lists.newArrayList(OpenTracingAspects.getAspects());
         fProcesses = new HashMap<>();
+        fIndexToSpanData = new HashMap<>();
     }
 
     @Override
@@ -94,10 +110,23 @@ public class OpenTracingTrace extends JsonTrace {
         }
         try {
             fFileInput = new BufferedRandomAccessFile(fFile, "r"); //$NON-NLS-1$
-            goToCorrectStart(fFileInput);
-            registerProcesses(path);
         } catch (IOException e) {
             throw new TmfTraceException(e.getMessage(), e);
+        }
+
+        // First pass through the trace
+        Gson gson = new Gson();
+        try {
+            JsonReader reader = new JsonReader(new FileReader(path));
+            TraceFile tf = gson.fromJson(reader, TraceFile.class);
+            long i = 1;
+            for (TraceData td : tf.data) {
+                for (JsonObject sd : td.spanData) {
+                    fIndexToSpanData.put(i, sd.toString());
+                    i++;
+                }
+            }
+        } catch (Exception e) {
         }
     }
 
@@ -108,20 +137,7 @@ public class OpenTracingTrace extends JsonTrace {
      *            trace file path
      */
     public void registerProcesses(String path) {
-        try (FileReader fileReader = new FileReader(path)) {
-            try (JsonReader reader = new JsonReader(fileReader);) {
-                Gson gson = new Gson();
-                JsonObject object = gson.fromJson(reader, JsonObject.class);
-                JsonElement trace = object.get("data").getAsJsonArray().get(0); //$NON-NLS-1$
-                JsonObject processes = trace.getAsJsonObject().get("processes").getAsJsonObject(); //$NON-NLS-1$
-                for (int i = 1; i <= processes.size(); i++) {
-                    String processName = "p" + i; //$NON-NLS-1$
-                    fProcesses.put(processName, gson.toJson(processes.get(processName)));
-                }
-            }
-        } catch (IOException e) {
-            // Nothing
-        }
+
     }
 
     @Override
@@ -133,78 +149,30 @@ public class OpenTracingTrace extends JsonTrace {
         if (!file.isFile()) {
             return new Status(IStatus.ERROR, Activator.PLUGIN_ID, "Not a file. It's a directory: " + path); //$NON-NLS-1$
         }
-        int confidence = 0;
-
         try {
             if (!TmfTraceUtils.isText(file)) {
-                return new TraceValidationStatus(confidence, Activator.PLUGIN_ID);
+                return new TraceValidationStatus(0, Activator.PLUGIN_ID);
             }
         } catch (IOException e) {
             Activator.getInstance().logError("Error validating file: " + path, e); //$NON-NLS-1$
             return new Status(IStatus.ERROR, Activator.PLUGIN_ID, "IOException validating file: " + path, e); //$NON-NLS-1$
         }
-        try (BufferedRandomAccessFile rafile = new BufferedRandomAccessFile(path, "r")) { //$NON-NLS-1$
-            goToCorrectStart(rafile);
-            int lineCount = 0;
-            int matches = 0;
-            String line = readNextEventString(() -> rafile.read());
-            while ((line != null) && (lineCount++ < MAX_LINES)) {
-                try {
-                    OpenTracingField field = OpenTracingField.parseJson(line, null);
-                    if (field != null) {
-                        matches++;
-                    }
-                } catch (RuntimeException e) {
-                    confidence = Integer.MIN_VALUE;
-                }
 
-                confidence = MAX_CONFIDENCE * matches / lineCount;
-                line = readNextEventString(() -> rafile.read());
+        // Validate contents
+        Gson gson = new Gson();
+        try {
+            JsonReader reader = new JsonReader(new FileReader(file));
+            try {
+                gson.fromJson(reader, TraceFile.class);
+            } catch (JsonSyntaxException e) {
+                return new TraceValidationStatus(0, Activator.PLUGIN_ID);
             }
-            if (matches == 0) {
-                return new Status(IStatus.ERROR, Activator.PLUGIN_ID, "Most assuredly NOT a Open-Tracing trace"); //$NON-NLS-1$
-            }
-        } catch (IOException e) {
-            Activator.getInstance().logError("Error validating file: " + path, e); //$NON-NLS-1$
-            return new Status(IStatus.ERROR, Activator.PLUGIN_ID, "IOException validating file: " + path, e); //$NON-NLS-1$
-        }
-        return new TraceValidationStatus(confidence, Activator.PLUGIN_ID);
-    }
 
-    private static void goToCorrectStart(RandomAccessFile rafile) throws IOException {
-        // skip start (ex.: "{"data":[{"traceID":"dcb56e6e03f3a509","spans":") before
-        // the spans list
-        StringBuilder sb = new StringBuilder();
-        int val = rafile.read();
-        /*
-         * Skip list contains all the odd control characters
-         */
-        Set<Integer> skipList = new HashSet<>();
-        skipList.add((int) ':');
-        skipList.add((int) '\t');
-        skipList.add((int) '\n');
-        skipList.add((int) '\r');
-        skipList.add((int) ' ');
-        skipList.add((int) '\b');
-        skipList.add((int) '\f');
-        while (val != -1 && val != ':' && sb.length() < 46) {
-            if (!skipList.contains(val)) {
-                sb.append((char) val);
-            }
-            val = rafile.read();
+        } catch (FileNotFoundException e) {
+            return new Status(IStatus.ERROR, Activator.PLUGIN_ID, "File not found: " + path); //$NON-NLS-1$
         }
 
-        if (sb.toString().startsWith("{\"data\"")) { //$NON-NLS-1$
-            int data = 0;
-            for (int nbBracket = 0; nbBracket < 2 && data != -1; nbBracket++) {
-                data = rafile.read();
-                while (data != '[' && data != -1) {
-                    data = rafile.read();
-                }
-            }
-        } else {
-            rafile.seek(0);
-        }
+        return new TraceValidationStatus(MAX_CONFIDENCE, Activator.PLUGIN_ID);
     }
 
     @Override
@@ -222,21 +190,14 @@ public class OpenTracingTrace extends JsonTrace {
             if (location.equals(NULL_LOCATION)) {
                 locationInfo = 0L;
             }
-            try {
-                if (!locationInfo.equals(fFileInput.getFilePointer())) {
-                    fFileInput.seek(locationInfo);
+            String nextJson = fIndexToSpanData.get(locationInfo);
+            if (nextJson != null) {
+                String process = fProcesses.get(OpenTracingField.getProcess(nextJson));
+                OpenTracingField field = OpenTracingField.parseJson(nextJson, process);
+                if (field == null) {
+                    return null;
                 }
-                String nextJson = readNextEventString(() -> fFileInput.read());
-                if (nextJson != null) {
-                    String process = fProcesses.get(OpenTracingField.getProcess(nextJson));
-                    OpenTracingField field = OpenTracingField.parseJson(nextJson, process);
-                    if (field == null) {
-                        return null;
-                    }
-                    return new OpenTracingEvent(this, context.getRank(), field);
-                }
-            } catch (IOException e) {
-                Activator.getInstance().logError("Error parsing event", e); //$NON-NLS-1$
+                return new OpenTracingEvent(this, context.getRank(), field);
             }
         }
         return null;
@@ -264,6 +225,27 @@ public class OpenTracingTrace extends JsonTrace {
             if (getIndexer() != null) {
                 getIndexer().updateIndex(context, timestamp);
             }
+            ITmfLocation loc = context.getLocation();
+            TmfLongLocation nextLoc;
+            if (loc instanceof TmfLongLocation) {
+                TmfLongLocation tmfLongLocation = (TmfLongLocation) loc;
+                Long locationInfo = tmfLongLocation.getLocationInfo();
+                nextLoc = new TmfLongLocation(locationInfo + 1);
+            } else {
+                nextLoc = new TmfLongLocation(1);
+            }
+            context.setLocation(nextLoc);
         }
+    }
+
+    @Override
+    public synchronized ITmfEvent getNext(final ITmfContext context) {
+        // parseEvent() does not update the context
+        final ITmfEvent event = parseEvent(context);
+        if (event != null) {
+            updateAttributes(context, event);
+            context.increaseRank();
+        }
+        return event;
     }
 }

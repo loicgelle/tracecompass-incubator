@@ -17,7 +17,9 @@ import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.jdt.annotation.NonNull;
 import org.eclipse.jdt.annotation.Nullable;
 import org.eclipse.jface.action.Action;
+import org.eclipse.jface.action.IAction;
 import org.eclipse.jface.action.IMenuManager;
+import org.eclipse.jface.action.IToolBarManager;
 import org.eclipse.jface.viewers.ISelection;
 import org.eclipse.jface.viewers.StructuredSelection;
 import org.eclipse.swt.graphics.Image;
@@ -39,6 +41,7 @@ import org.eclipse.tracecompass.tmf.ui.widgets.timegraph.TimeGraphPresentationPr
 import org.eclipse.tracecompass.tmf.ui.widgets.timegraph.model.IMarkerEvent;
 import org.eclipse.tracecompass.tmf.ui.widgets.timegraph.model.ITimeGraphEntry;
 import org.eclipse.tracecompass.tmf.ui.widgets.timegraph.model.TimeGraphEntry;
+import org.eclipse.ui.IWorkbenchActionConstants;
 
 /**
  * Simple gantt chart to see the life of the spans
@@ -69,33 +72,6 @@ public class SpanLifeView extends BaseDataProviderTimeGraphView {
         }
 
     }
-
-//    private class FollowSpanCPAction extends Action {
-//
-//        private final SpanLifeView fView;
-//        private final String fSpanUID;
-//
-//        public FollowSpanCPAction(SpanLifeView source, String spanUID) {
-//            fView = source;
-//            fSpanUID = spanUID;
-//        }
-//
-//        @Override
-//        public String getText() {
-//            return "Follow critical path for span " + fSpanUID;
-//        }
-//
-//        @Override
-//        public void run() {
-//            // TODO
-//            TraceCompassFilter filter = TraceCompassFilter.fromRegex(
-//                    Collections.singleton("arrows/" + fSpanUID), fView.getTrace());
-//            TmfFilterAppliedSignal signal = new TmfFilterAppliedSignal(fView, fView.getTrace(), filter);
-//            fView.regexFilterApplied(signal);
-//            super.run();
-//        }
-//
-//    }
 
     /**
      * Span life view Id
@@ -166,7 +142,6 @@ public class SpanLifeView extends BaseDataProviderTimeGraphView {
 
     @Override
     protected void fillTimeGraphEntryContextMenu(@NonNull IMenuManager menuManager) {
-        // TODO Auto-generated method stub
         ISelection selection = getSite().getSelectionProvider().getSelection();
         if (selection instanceof StructuredSelection) {
             StructuredSelection sSel = (StructuredSelection) selection;
@@ -181,15 +156,25 @@ public class SpanLifeView extends BaseDataProviderTimeGraphView {
                                                                            String.valueOf(threadId.getTid()),
                                                                            threadId);
                         menuManager.add(action);
-//                        String spanUID = SpanLifeStateProvider.getSpanId(entry.getName());
-//                        FollowSpanCPAction actionCP = new FollowSpanCPAction(SpanLifeView.this, spanUID);
-//                        menuManager.add(actionCP);
                     }
                 } else {
                     menuManager.add(new FollowTraceAction(SpanLifeView.this, entry.getName()));
                 }
             }
         }
+    }
+
+    @Override
+    protected void fillLocalToolBar(IToolBarManager manager) {
+        IAction followArrowBwdAction = getTimeGraphViewer().getFollowArrowBwdAction();
+        followArrowBwdAction.setText("Follow arrow backward"); //$NON-NLS-1$
+        followArrowBwdAction.setToolTipText("Follow arrow backward"); //$NON-NLS-1$
+        manager.appendToGroup(IWorkbenchActionConstants.MB_ADDITIONS, followArrowBwdAction);
+
+        IAction followArrowFwdAction = getTimeGraphViewer().getFollowArrowFwdAction();
+        followArrowFwdAction.setText("Follow arrow forward"); //$NON-NLS-1$
+        followArrowFwdAction.setToolTipText("Follow arrow forward"); //$NON-NLS-1$
+        manager.appendToGroup(IWorkbenchActionConstants.MB_ADDITIONS, followArrowFwdAction);
     }
 
 }

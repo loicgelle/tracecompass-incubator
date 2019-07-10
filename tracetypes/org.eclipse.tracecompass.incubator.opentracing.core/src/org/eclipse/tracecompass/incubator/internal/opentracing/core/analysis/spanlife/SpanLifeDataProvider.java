@@ -43,7 +43,7 @@ import org.eclipse.tracecompass.tmf.core.model.timegraph.TimeGraphState;
 import org.eclipse.tracecompass.tmf.core.response.ITmfResponse;
 import org.eclipse.tracecompass.tmf.core.response.TmfModelResponse;
 import org.eclipse.tracecompass.tmf.core.response.ITmfResponse.Status;
-import org.eclipse.tracecompass.tmf.core.timestamp.TmfTimestamp;
+//import org.eclipse.tracecompass.tmf.core.timestamp.TmfTimestamp;
 import org.eclipse.tracecompass.tmf.core.trace.ITmfTrace;
 
 import com.google.common.collect.ImmutableList.Builder;
@@ -60,7 +60,7 @@ import com.google.common.collect.TreeMultimap;
 @SuppressWarnings("restriction")
 public class SpanLifeDataProvider extends AbstractTimeGraphDataProvider<@NonNull SpanLifeAnalysis, @NonNull TimeGraphEntryModel> {
 
-    private static final int MARKER_SIZE = 500;
+//    private static final int MARKER_SIZE = 500;
 
     private static final String ERROR = "error"; //$NON-NLS-1$
     private static final String EVENT = "event"; //$NON-NLS-1$
@@ -96,14 +96,16 @@ public class SpanLifeDataProvider extends AbstractTimeGraphDataProvider<@NonNull
             return new TmfModelResponse<>(null, Status.COMPLETED, CommonStatusMessage.COMPLETED);
         }
 
-        Collection<@NonNull Integer> arrowOutQuarks = ss.getQuarks(SpanLifeStateProvider.CP_ARROWS_ATTRIBUTE_OUT, "*");
+        Collection<@NonNull Integer> arrowQuarks = ss.getQuarks(SpanLifeStateProvider.CP_ARROWS_ATTRIBUTE, "*");
         try {
-            for (ITmfStateInterval arrowState : ss.query2D(arrowOutQuarks, filter.getStart(), filter.getEnd())) {
-                String spanToUID = arrowState.getValueString();
-                if (spanToUID == null) {
+            for (ITmfStateInterval arrowState : ss.query2D(arrowQuarks, filter.getStart(), filter.getEnd())) {
+                String stateStr = arrowState.getValueString();
+                if (stateStr == null) {
                     continue;
                 }
-                String spanFromUID = ss.getAttributeName(arrowState.getAttribute());
+                String[] stateStrSpl = stateStr.split("/");
+                String spanFromUID = stateStrSpl[0];
+                String spanToUID = stateStrSpl[1];
                 Long entryFrom = fSpanUIDToEntryID.get(spanFromUID);
                 Long entryTo = fSpanUIDToEntryID.get(spanToUID);
                 if (entryFrom == null || entryTo == null) {
@@ -112,26 +114,6 @@ public class SpanLifeDataProvider extends AbstractTimeGraphDataProvider<@NonNull
                 arrows.add(new TimeGraphArrow(entryFrom, entryTo, arrowState.getStartTime(), arrowState.getEndTime() - arrowState.getStartTime(), -2));
             }
         } catch (IndexOutOfBoundsException | TimeRangeException | StateSystemDisposedException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        }
-        Collection<@NonNull Integer> arrowInQuarks = ss.getQuarks(SpanLifeStateProvider.CP_ARROWS_ATTRIBUTE_IN, "*");
-        try {
-            for (ITmfStateInterval arrowState : ss.query2D(arrowInQuarks, filter.getStart(), filter.getEnd())) {
-                String spanFromUID = arrowState.getValueString();
-                if (spanFromUID == null) {
-                    continue;
-                }
-                String spanToUID = ss.getAttributeName(arrowState.getAttribute());
-                Long entryFrom = fSpanUIDToEntryID.get(spanFromUID);
-                Long entryTo = fSpanUIDToEntryID.get(spanToUID);
-                if (entryFrom == null || entryTo == null) {
-                    continue;
-                }
-                arrows.add(new TimeGraphArrow(entryFrom, entryTo, arrowState.getStartTime(), arrowState.getEndTime() - arrowState.getStartTime(), -2));
-            }
-        } catch (IndexOutOfBoundsException | TimeRangeException | StateSystemDisposedException e) {
-            // TODO Auto-generated catch block
             e.printStackTrace();
         }
 
@@ -143,22 +125,22 @@ public class SpanLifeDataProvider extends AbstractTimeGraphDataProvider<@NonNull
         ITmfStateSystem ss = getAnalysisModule().getStateSystem();
         Map<@NonNull Long, @NonNull Integer> entries = getSelectedEntries(filter);
         Collection<@NonNull Integer> quarks = entries.values();
-        long startTime = filter.getStart();
+//        long startTime = filter.getStart();
         long hoverTime = filter.getTimesRequested()[1];
-        long endTime = filter.getEnd();
+//        long endTime = filter.getEnd();
         if (ss == null || quarks.size() != 1 || !getAnalysisModule().isQueryable(hoverTime)) {
             return new TmfModelResponse<>(null, ITmfResponse.Status.COMPLETED, CommonStatusMessage.COMPLETED);
         }
 
-        int traceLogsQuark = ITmfStateSystem.INVALID_ATTRIBUTE;
-        try {
-            String traceId = ss.getFullAttributePathArray(quarks.iterator().next())[0];
-            traceLogsQuark = ss.getQuarkRelative(ss.getQuarkAbsolute(traceId), IOpenTracingConstants.LOGS);
-        } catch (AttributeNotFoundException e) {
-            return new TmfModelResponse<>(null, ITmfResponse.Status.CANCELLED, CommonStatusMessage.TASK_CANCELLED);
-        }
-
-        int spanLogQuark = getLogQuark(ss, ss.getAttributeName(quarks.iterator().next()), ss.getSubAttributes(traceLogsQuark, false));
+//        int traceLogsQuark = ITmfStateSystem.INVALID_ATTRIBUTE;
+//        try {
+//            String traceId = ss.getFullAttributePathArray(quarks.iterator().next())[0];
+//            traceLogsQuark = ss.getQuarkRelative(ss.getQuarkAbsolute(traceId), IOpenTracingConstants.LOGS);
+//        } catch (AttributeNotFoundException e) {
+//            return new TmfModelResponse<>(null, ITmfResponse.Status.CANCELLED, CommonStatusMessage.TASK_CANCELLED);
+//        }
+//
+//        int spanLogQuark = getLogQuark(ss, ss.getAttributeName(quarks.iterator().next()), ss.getSubAttributes(traceLogsQuark, false));
 
         try {
             Map<@NonNull String, @NonNull String> retMap = new HashMap<>();
@@ -179,26 +161,26 @@ public class SpanLifeDataProvider extends AbstractTimeGraphDataProvider<@NonNull
                 return new TmfModelResponse<>(infoMap, Status.COMPLETED, CommonStatusMessage.COMPLETED);
             }
 
-            if (spanLogQuark != ITmfStateSystem.INVALID_ATTRIBUTE) {
-                Long ssStartTime = startTime == Long.MIN_VALUE ? ss.getStartTime() : startTime;
-                Long ssEndTime = endTime == Long.MIN_VALUE ? ss.getCurrentEndTime() : endTime;
-                Long deviationAccepted = (ssEndTime - ssStartTime) / MARKER_SIZE;
-                for (ITmfStateInterval state : ss.query2D(Collections.singletonList(spanLogQuark), Math.max(hoverTime - deviationAccepted, ssStartTime), Math.min(hoverTime + deviationAccepted, ssEndTime))) {
-                    Object object = state.getValue();
-                    if (object instanceof String) {
-                        String logs = (String) object;
-                        String timestamp = TmfTimestamp.fromNanos(state.getStartTime()).toString();
-                        if (timestamp != null) {
-                            retMap.put("log timestamp", timestamp); //$NON-NLS-1$
-                        }
-                        String[] fields = logs.split("~"); //$NON-NLS-1$
-                        for (String field : fields) {
-                            retMap.put(field.substring(0, field.indexOf(':')), field.substring(field.indexOf(':') + 1));
-                        }
-                        return new TmfModelResponse<>(retMap, ITmfResponse.Status.COMPLETED, CommonStatusMessage.COMPLETED);
-                    }
-                }
-            }
+//            if (spanLogQuark != ITmfStateSystem.INVALID_ATTRIBUTE) {
+//                Long ssStartTime = startTime == Long.MIN_VALUE ? ss.getStartTime() : startTime;
+//                Long ssEndTime = endTime == Long.MIN_VALUE ? ss.getCurrentEndTime() : endTime;
+//                Long deviationAccepted = (ssEndTime - ssStartTime) / MARKER_SIZE;
+//                for (ITmfStateInterval state : ss.query2D(Collections.singletonList(spanLogQuark), Math.max(hoverTime - deviationAccepted, ssStartTime), Math.min(hoverTime + deviationAccepted, ssEndTime))) {
+//                    Object object = state.getValue();
+//                    if (object instanceof String) {
+//                        String logs = (String) object;
+//                        String timestamp = TmfTimestamp.fromNanos(state.getStartTime()).toString();
+//                        if (timestamp != null) {
+//                            retMap.put("log timestamp", timestamp); //$NON-NLS-1$
+//                        }
+//                        String[] fields = logs.split("~"); //$NON-NLS-1$
+//                        for (String field : fields) {
+//                            retMap.put(field.substring(0, field.indexOf(':')), field.substring(field.indexOf(':') + 1));
+//                        }
+//                        return new TmfModelResponse<>(retMap, ITmfResponse.Status.COMPLETED, CommonStatusMessage.COMPLETED);
+//                    }
+//                }
+//            }
             return new TmfModelResponse<>(retMap, ITmfResponse.Status.COMPLETED, CommonStatusMessage.COMPLETED);
         } catch (StateSystemDisposedException e) {
             return new TmfModelResponse<>(null, ITmfResponse.Status.CANCELLED, CommonStatusMessage.TASK_CANCELLED);

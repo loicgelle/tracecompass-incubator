@@ -51,6 +51,8 @@ import com.google.common.collect.ImmutableMap;
  * Span life presentation provider
  *
  * @author Katherine Nadeau
+ * @author Loïc Gelle
+ *
  */
 public class SpanLifePresentationProvider extends TimeGraphPresentationProvider {
 
@@ -88,14 +90,14 @@ public class SpanLifePresentationProvider extends TimeGraphPresentationProvider 
                             ITimeEventStyleStrings.fillColor(), new RGBAColor(0, 0, 0).toInt()))
     };
 
-    public static final int NETWORK_ARROW_INDEX_1;
-    public static final int UNKNOWN_ARROW_INDEX_1;
-    public static final StateItem[] CP_STATE_TABLE_1;
+    public static final int NETWORK_ARROW_INDEX;
+    public static final int UNKNOWN_ARROW_INDEX;
+    public static final StateItem[] CP_STATE_TABLE;
     static {
         int networkArrowIndex = -1;
         int unknownNetworkIndex = -1;
-        CP_STATE_TABLE_1 = new StateItem[State.values().length];
-        for (int i = 0; i < CP_STATE_TABLE_1.length; i++) {
+        CP_STATE_TABLE = new StateItem[State.values().length];
+        for (int i = 0; i < CP_STATE_TABLE.length; i++) {
             State state = State.values()[i];
 
             float heightFactor = 1.0f;
@@ -116,46 +118,11 @@ public class SpanLifePresentationProvider extends TimeGraphPresentationProvider 
                     ITimeEventStyleStrings.heightFactor(), heightFactor,
                     ITimeEventStyleStrings.itemTypeProperty(), stateType
                     );
-            CP_STATE_TABLE_1[i] = new StateItem(styleMap);
+            CP_STATE_TABLE[i] = new StateItem(styleMap);
         }
 
-        NETWORK_ARROW_INDEX_1 = networkArrowIndex;
-        UNKNOWN_ARROW_INDEX_1 = unknownNetworkIndex;
-    }
-
-    public static final int NETWORK_ARROW_INDEX_2;
-    public static final int UNKNOWN_ARROW_INDEX_2;
-    public static final StateItem[] CP_STATE_TABLE_2;
-    static {
-        int networkArrowIndex = -1;
-        int unknownNetworkIndex = -1;
-        CP_STATE_TABLE_2 = new StateItem[State.values().length];
-        for (int i = 0; i < CP_STATE_TABLE_2.length; i++) {
-            State state = State.values()[i];
-
-            float heightFactor = 1.0f;
-            if (state.equals(State.NETWORK_ARROW)) {
-                networkArrowIndex = i;
-                heightFactor = 0.1f;
-            } else if (state.equals(State.UNKNOWN_ARROW)) {
-                unknownNetworkIndex = i;
-                heightFactor = 0.1f;
-            }
-
-            RGB stateColor = state.rgb;
-            String stateType = state.equals(State.NETWORK_ARROW) || state.equals(State.UNKNOWN_ARROW) ? ITimeEventStyleStrings.linkType() : ITimeEventStyleStrings.stateType();
-            ImmutableMap<String, Object> styleMap = ImmutableMap.of(
-                    ITimeEventStyleStrings.fillStyle(), ITimeEventStyleStrings.solidColorFillStyle(),
-                    ITimeEventStyleStrings.fillColor(), new RGBAColor(stateColor.red, stateColor.green, stateColor.blue, 150).toInt(),
-                    ITimeEventStyleStrings.label(), String.valueOf(state.toString()),
-                    ITimeEventStyleStrings.heightFactor(), heightFactor,
-                    ITimeEventStyleStrings.itemTypeProperty(), stateType
-                    );
-            CP_STATE_TABLE_2[i] = new StateItem(ImmutableMap.copyOf(styleMap));
-        }
-
-        NETWORK_ARROW_INDEX_2 = networkArrowIndex;
-        UNKNOWN_ARROW_INDEX_2 = unknownNetworkIndex;
+        NETWORK_ARROW_INDEX = networkArrowIndex;
+        UNKNOWN_ARROW_INDEX = unknownNetworkIndex;
     }
 
     /**
@@ -167,31 +134,19 @@ public class SpanLifePresentationProvider extends TimeGraphPresentationProvider 
 
     @Override
     public StateItem[] getStateTable() {
-        return ArrayUtils.addAll(STATE_TABLE,
-                ArrayUtils.addAll(CP_STATE_TABLE_1, CP_STATE_TABLE_2));
+        return ArrayUtils.addAll(STATE_TABLE, CP_STATE_TABLE);
     }
 
     public int getCPStateTableIndex(@Nullable ITimeEvent event) {
         if (event instanceof TimeEvent && ((TimeEvent) event).hasValue()) {
             int value = ((TimeEvent) event).getValue();
-            if (value < getCPStateTableLength()) {
-                if (event instanceof ILinkEvent) {
-                    //return the right arrow item index
-                    return CP_STATE_TABLE_1[value]
-                                .getStateString()
-                                .equals(CriticalPathPresentationProvider.State.NETWORK.toString())
-                            ? NETWORK_ARROW_INDEX_1
-                                    : UNKNOWN_ARROW_INDEX_1;
-                }
-                return value;
-            }
             if (event instanceof ILinkEvent) {
                 //return the right arrow item index
-                return CP_STATE_TABLE_2[value]
+                return CP_STATE_TABLE[value]
                             .getStateString()
                             .equals(CriticalPathPresentationProvider.State.NETWORK.toString())
-                        ? getCPStateTableLength() + NETWORK_ARROW_INDEX_2
-                                : getCPStateTableLength() + UNKNOWN_ARROW_INDEX_2;
+                        ? NETWORK_ARROW_INDEX
+                                : UNKNOWN_ARROW_INDEX;
             }
             return value;
         }
@@ -275,9 +230,5 @@ public class SpanLifePresentationProvider extends TimeGraphPresentationProvider 
             return 0;
         }
         return -1;
-    }
-
-    public static int getCPStateTableLength() {
-        return State.values().length;
     }
 }
